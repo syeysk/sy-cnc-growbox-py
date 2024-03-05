@@ -17,8 +17,8 @@ classifiers = [
 dependencies = [
 ]
 
-#[project.scripts]
-#py2c = "growbox.cli:run"
+[project.gui-scripts]
+growbox = "growbox.gui:run"
 
 [build-system]
 requires = ["setuptools", "wheel"]

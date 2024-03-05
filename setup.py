@@ -38,9 +38,9 @@ setup(
     # install_requires=install_requires,
 
     entry_points={
-    #    'console_scripts': [
-    #        'py2c = py2c.cli:run',
-    #    ]
+        'gui_scripts': [
+            'growbox = growbox.gui:run',
+        ]
     },
 
     include_package_data=True,
