@@ -1,0 +1,24 @@
+[project]
+name = "growbox"
+description = "Python interfaces for CNC Growbox"
+readme = { file = "README.md", content-type = "text/markdown" }
+version = "0.0.1"
+authors = [
+    { name = "Polyakov Konstantin", email = "shyzik93@mail.ru" }
+]
+license = { file = "LICENSE.txt" }
+maintainers = [
+   { name = "Polyakov Konstantin", email = "shyzik93@mail.ru" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+]
+
+#[project.scripts]
+#py2c = "growbox.cli:run"
+
+[build-system]
+requires = ["setuptools", "wheel"]
