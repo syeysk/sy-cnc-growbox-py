@@ -3,10 +3,28 @@ import sys
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QToolBar, QGroupBox, QGridLayout,
-    QCheckBox, QHBoxLayout,
+    QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox,
 )
 
 from gcode_builder import GrowboxGCodeBuilder
+
+
+class ActuatorSetValueDialog(QDialog):
+    def __init__(self, parent=None, text=''):
+        super().__init__(parent)
+        self.setWindowTitle(f'Новое значение для "{text}"')
+
+        QBtn = QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel
+        buttonBox = QDialogButtonBox(QBtn)
+        buttonBox.clicked.connect(self.accept)
+        buttonBox.rejected.connect(self.reject)
+
+        layout = QVBoxLayout()
+        self.input = QLineEdit()
+        self.input.setInputMask(r'999')
+        layout.addWidget(self.input)
+        layout.addWidget(buttonBox)
+        self.setLayout(layout)
 
 
 class MainWindow(QMainWindow):
@@ -41,21 +59,32 @@ class MainWindow(QMainWindow):
         groupbox.setLayout(layout)
         return groupbox
 
+    def btn_set_value_clicked(self, s, actuator_code, text):
+        print('click', s)
+        dlg = ActuatorSetValueDialog(self, text)
+        if dlg.exec():
+            print("Success!")
+            print(actuator_code, dlg.input.text())
+        else:
+            print("Cancel!")
+
+    def build_btn_set_value(self, layout, actuator_code, text, y):
+        label = QLabel(text)
+        layout.addWidget(label, y, 0)
+        layout.addWidget(QLabel('0'), y, 1)
+        button = QPushButton('✎')
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, actuator_code, text))
+        layout.addWidget(button, y, 2)
+
     def build_groupbox_actuators(self):
+        ACTUATOR_HUMID = 0
+        ACTUATOR_EXTRACTOR = 1
+        ACTUATOR_WHITE_LIGHT = 2
+
         layout = QGridLayout()
-
-        layout.addWidget(QLabel('Белый свет:'), 0, 0)
-        layout.addWidget(QLabel('0'), 0, 1)
-        layout.addWidget(QPushButton('✎'), 0, 2)
-
-        layout.addWidget(QLabel('Вытяжка:'), 1, 0)
-        layout.addWidget(QLabel('0'), 1, 1)
-        layout.addWidget(QPushButton('✎'), 1, 2)
-
-        layout.addWidget(QLabel('Увлажнитель:'), 2, 0)
-        layout.addWidget(QLabel('0'), 2, 1)
-        layout.addWidget(QPushButton('✎'), 2, 2)
-
+        self.build_btn_set_value(layout, ACTUATOR_WHITE_LIGHT, 'Белый свет:', 0)
+        self.build_btn_set_value(layout, ACTUATOR_EXTRACTOR, 'Вытяжка:', 1)
+        self.build_btn_set_value(layout, ACTUATOR_HUMID, 'Увлажнитель:', 2)
         groupbox = QGroupBox('Исполнительные устройства')
         groupbox.setLayout(layout)
         return groupbox
