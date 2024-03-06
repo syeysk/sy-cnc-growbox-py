@@ -11,7 +11,7 @@ from gcode_builder import GrowboxGCodeBuilder
 
 
 class SetValueDialog(QDialog):
-    def __init__(self, parent=None, text='', input_widget=None):
+    def __init__(self, parent=None, text='', initial_value='0', input_widget=None):
         super().__init__(parent)
         self.setWindowTitle(f'Новое значение для "{text}"')
 
@@ -25,6 +25,7 @@ class SetValueDialog(QDialog):
         if self.input is None:
             self.input = QLineEdit()
             self.input.setInputMask(r'999')
+            self.input.setText(initial_value)
 
         layout.addWidget(self.input)
         layout.addWidget(buttonBox)
@@ -34,6 +35,11 @@ class SetValueDialog(QDialog):
 class BaseAutoWindow(QWidget):
     gcode_auto = None
     code = None
+    is_closed = False
+
+    def closeEvent(self, *args, **kwargs):
+        super().closeEvent(*args, **kwargs)
+        self.is_closed = True
 
     def __init__(self, actuator_code, actuator_name, gcode: GrowboxGCodeBuilder, parent=None):
         super().__init__(parent)
@@ -51,7 +57,7 @@ class BaseAutoWindow(QWidget):
 
 class AutoCycleHardWindow(BaseAutoWindow):
     def btn_set_value_clicked(self, checked, period_code, text, label_value, what_set):
-        dlg = SetValueDialog(self, text)
+        dlg = SetValueDialog(self, text, label_value.text())
         if dlg.exec():
             value = dlg.input.text()
             label_value.setText(value)
@@ -95,7 +101,7 @@ class AutoCycleHardWindow(BaseAutoWindow):
 
 class AutoCycleSoftWindow(BaseAutoWindow):
     def btn_set_value_clicked(self, checked, period_code, text, label_value, what_set):
-        dlg = SetValueDialog(self, text)
+        dlg = SetValueDialog(self, text, label_value.text())
         if dlg.exec():
             value = dlg.input.text()
             label_value.setText(value)
@@ -180,14 +186,17 @@ class AutoClimateControlWindow(BaseAutoWindow):
         self.setLayout(layout)
 
     def btn_set_value_clicked(self, checked, text, label_value, what_set):
+        initial_value = label_value.text()
         input_widget = None
         if what_set == 'sensor':
             input_widget = QListWidget()
             for sensor_code, sensor_name in self.sensors.items():
                 widget_item = QListWidgetItem(sensor_name, input_widget)
                 widget_item.setData(Qt.ItemDataRole.UserRole, sensor_code)
+                if initial_value == sensor_name:
+                    widget_item.setSelected(True)
 
-        dlg = SetValueDialog(self, text, input_widget)
+        dlg = SetValueDialog(self, text, initial_value, input_widget)
         if dlg.exec():
             if what_set == 'min':
                 value = dlg.input.text()
@@ -236,7 +245,7 @@ class MainWindow(QMainWindow):
         return groupbox
 
     def btn_set_value_clicked(self, checked, actuator_code, text, label_value):
-        dlg = SetValueDialog(self, text)
+        dlg = SetValueDialog(self, text, label_value.text())
         if dlg.exec():
             value = dlg.input.text()
             label_value.setText(value)
@@ -247,7 +256,7 @@ class MainWindow(QMainWindow):
         window_class = auto_windows_classes[gcode_auto.CODE]
         window_key = (gcode_auto.CODE, actuator_code)
         opened_window = self.auto_windows.get(window_key)
-        if opened_window is None:
+        if opened_window is None or opened_window.is_closed:
             opened_window = window_class(actuator_code, actuator_name, self.gcode)
             self.auto_windows[window_key] = opened_window
             opened_window.show()
