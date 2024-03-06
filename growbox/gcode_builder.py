@@ -12,12 +12,15 @@ class WriterInterface:
         else:
             self.need_wait_answer = need_wait_answer
 
-            # def write2(self, command: str, **kwargs):
-    #     args = ' '.join([f'{k.upper()}{v}' for k, v in kwargs.items])
-    #     self.output.write(f'{command} {args}')
-
     def write(self, data: str):
-        self.output.write(f'{data}\n'.encode())
+        data = f'{data}\n'
+        mode = getattr(self.output, 'mode', 'wb')
+        encoding = getattr(self.output, 'encoding', 'utf-8')
+
+        if mode == 'wb':
+            data = data.encode(encoding)
+
+        self.output.write(data)
         if self.need_wait_answer:
             return self.output.read(100)
 
@@ -51,7 +54,7 @@ class Sensor:
         return self.output.write(f'E2 S{self.code}')
 
 
-class AutoCycle:
+class AutoCycleHard:
     # Periods
     DAY = 1
     NIGHT = 0
@@ -59,13 +62,13 @@ class AutoCycle:
     def __init__(self, output: WriterInterface):
         self.output = output
 
-    def turn(self, actuator: Actuator, status: bool):
+    def turn(self, actuator: Actuator | int | str, status: bool):
         return self.output.write(f'E100 A{actuator} B{int(status)}')
 
-    def set_duration(self, actuator: Actuator, period: int, duration: int):
+    def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E101 A{actuator} B{period} D{duration}')
 
-    def set_value(self, actuator: Actuator, period: int, value: int):
+    def set_value(self, actuator: Actuator | int | str, period: int, value: int):
         return self.output.write(f'E103 A{actuator} B{period} V{value}')
 
 
@@ -79,29 +82,40 @@ class AutoCycleSoft:
     def __init__(self, output: WriterInterface):
         self.output = output
 
-    def turn(self, actuator: Actuator, status: bool):
+    def turn(self, actuator: Actuator | int | str, status: bool):
         return self.output.write(f'E150 A{actuator} B{int(status)}')
 
-    def set_duration(self, actuator: Actuator, period: int, duration: int):
+    def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E151 A{actuator} P{period} D{duration}')
 
-    def set_value(self, actuator: Actuator, period: int, value: int):
+    def set_value(self, actuator: Actuator | int | str, period: int, value: int):
         return self.output.write(f'E153 A{actuator} P{period} V{value}')
 
 
 class GrowboxGCodeBuilder:
+    A_HUMID = 0
+    A_EXTRACTOR = 1
+    A_WHITE_LIGHT = 2
+    A_FRED_LIGHT = 3
+
     def __init__(self, output: io.TextIOWrapper | serial.Serial = sys.stdout):
         self.output = WriterInterface(output)
 
-        self.a_humid = Actuator(0, self.output)
-        self.a_extractor = Actuator(1, self.output)
-        self.a_white_light = Actuator(2, self.output)
-        self.a_fred_light = Actuator(3, self.output)
+        self.a_humid = Actuator(self.A_HUMID, self.output)
+        self.a_extractor = Actuator(self.A_EXTRACTOR, self.output)
+        self.a_white_light = Actuator(self.A_WHITE_LIGHT, self.output)
+        self.a_fred_light = Actuator(self.A_FRED_LIGHT, self.output)
+        self.actuators = {
+            self.a_humid.code: self.a_humid,
+            self.a_extractor.code: self.a_extractor,
+            self.a_white_light.code: self.a_white_light,
+            self.a_fred_light.code: self.a_fred_light,
+        }
 
         self.s_temperature = Sensor(0, self.output)
         self.s_humid = Sensor(1, self.output)
 
-        self.cycle_hard = AutoCycle(self.output)
+        self.cycle_hard = AutoCycleHard(self.output)
         self.cycle_soft = AutoCycleSoft(self.output)
 
     def turn_off_all_auto(self):
