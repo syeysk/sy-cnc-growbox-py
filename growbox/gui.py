@@ -1,16 +1,17 @@
 import sys
 
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QToolBar, QGroupBox, QGridLayout,
-    QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox,
+    QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
+    QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem
 )
 
 from gcode_builder import GrowboxGCodeBuilder
 
 
 class SetValueDialog(QDialog):
-    def __init__(self, parent=None, text=''):
+    def __init__(self, parent=None, text='', input_widget=None):
         super().__init__(parent)
         self.setWindowTitle(f'Новое значение для "{text}"')
 
@@ -20,8 +21,11 @@ class SetValueDialog(QDialog):
         buttonBox.rejected.connect(self.reject)
 
         layout = QVBoxLayout()
-        self.input = QLineEdit()
-        self.input.setInputMask(r'999')
+        self.input = input_widget
+        if self.input is None:
+            self.input = QLineEdit()
+            self.input.setInputMask(r'999')
+
         layout.addWidget(self.input)
         layout.addWidget(buttonBox)
         self.setLayout(layout)
@@ -137,11 +141,66 @@ class AutoClimateControlWindow(BaseAutoWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.gcode_auto = self.gcode.climate_control
+        self.sensors = {
+            self.gcode.s_humid.code: 'Влажность',
+            self.gcode.s_temperature.code: 'Температура',
+        }
 
         layout = QVBoxLayout()
         layout.addWidget(QLabel(f'Автоматика с автоподстройкой значения для устройства "{self.actuator_name}"'))
         layout.addWidget(self.checkbox_turn)
+
+        layout_grid = QGridLayout()
+        layout.addLayout(layout_grid)
+
+        text = 'Мин. допустимое значение'
+        label_value_min = QLabel('0')
+        button = QPushButton('✎')
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, label_value_min, 'min'))
+        layout_grid.addWidget(QLabel(text), 0, 0)
+        layout_grid.addWidget(label_value_min, 0, 1)
+        layout_grid.addWidget(button, 0, 2)
+
+        text = 'Макс. допустимое значение'
+        label_value_max = QLabel('0')
+        button = QPushButton('✎')
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, label_value_max, 'max'))
+        layout_grid.addWidget(QLabel(text), 1, 0)
+        layout_grid.addWidget(label_value_max, 1, 1)
+        layout_grid.addWidget(button, 1, 2)
+
+        text = 'Датчик'
+        label_value_sensor = QLabel(self.sensors[0])
+        button = QPushButton('✎')
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, label_value_sensor, 'sensor'))
+        layout_grid.addWidget(QLabel(text), 2, 0)
+        layout_grid.addWidget(label_value_sensor, 2, 1)
+        layout_grid.addWidget(button, 2, 2)
+
         self.setLayout(layout)
+
+    def btn_set_value_clicked(self, checked, text, label_value, what_set):
+        input_widget = None
+        if what_set == 'sensor':
+            input_widget = QListWidget()
+            for sensor_code, sensor_name in self.sensors.items():
+                widget_item = QListWidgetItem(sensor_name, input_widget)
+                widget_item.setData(Qt.ItemDataRole.UserRole, sensor_code)
+
+        dlg = SetValueDialog(self, text, input_widget)
+        if dlg.exec():
+            if what_set == 'min':
+                value = dlg.input.text()
+                label_value.setText(value)
+                self.gcode.climate_control.set_min(self.actuator_code, value)
+            elif what_set == 'max':
+                value = dlg.input.text()
+                label_value.setText(value)
+                self.gcode.climate_control.set_max(self.actuator_code, value)
+            elif what_set == 'sensor':
+                value = dlg.input.currentItem()
+                label_value.setText(value.text())
+                self.gcode.climate_control.set_sensor(self.actuator_code, value.data(Qt.ItemDataRole.UserRole))
 
 
 class MainWindow(QMainWindow):

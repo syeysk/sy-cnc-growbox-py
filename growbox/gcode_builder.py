@@ -103,6 +103,14 @@ class AutoClimateControl:
     def turn(self, actuator: Actuator | int | str, status: bool):
         return self.output.write(f'E200 A{actuator} B{int(status)}')
 
+    def set_min(self, actuator: Actuator | int | str, value: int):
+        return self.output.write(f'E202 A{actuator} V{value}')
+
+    def set_max(self, actuator: Actuator | int | str, value: int):
+        return self.output.write(f'E203 A{actuator} V{value}')
+
+    def set_sensor(self, actuator: Actuator | int | str, sensor: Sensor | int | str):
+        return self.output.write(f'E201 A{actuator} S{sensor}')
 
 class GrowboxGCodeBuilder:
     A_HUMID = 0
