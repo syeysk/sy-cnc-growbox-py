@@ -27,38 +27,55 @@ class SetValueDialog(QDialog):
         self.setLayout(layout)
 
 
-class AutoCycleHardWindow(QWidget):
-    CODE = 0
+class BaseAutoWindow(QWidget):
+    gcode_auto = None
+    code = None
 
-    def btn_set_value_clicked(self, checked, period_code, text, label_value):
+    def __init__(self, actuator_code, actuator_name, gcode: GrowboxGCodeBuilder, parent=None):
+        super().__init__(parent)
+        self.actuator_code = actuator_code
+        self.actuator_name = actuator_name
+        self.gcode = gcode
+        self.setWindowTitle(f'Настройка автоматики')
+
+        self.checkbox_turn = QCheckBox('Включена')
+        self.checkbox_turn.clicked.connect(self.btn_toggle_auto_clicked)
+
+    def btn_toggle_auto_clicked(self, checked):
+        self.gcode_auto.turn(self.actuator_code, checked)
+
+
+class AutoCycleHardWindow(BaseAutoWindow):
+    def btn_set_value_clicked(self, checked, period_code, text, label_value, what_set):
         dlg = SetValueDialog(self, text)
         if dlg.exec():
             value = dlg.input.text()
             label_value.setText(value)
-            self.gcode.cycle_hard.set_duration(self.actuator_code, period_code, value)
+            if what_set == 'duration':
+                self.gcode.cycle_hard.set_duration(self.actuator_code, period_code, value)
+            elif what_set == 'value':
+                self.gcode.cycle_hard.set_value(self.actuator_code, period_code, value)
 
     def build_btn_set_value(self, layout, period_code, text, y):
         label_value = QLabel('0')
 
         button = QPushButton('✎')
-        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, label_value))
+        what_set = 'value' if y else 'duration'
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, label_value, what_set))
 
         layout.addWidget(QLabel(text), y, 0)
         layout.addWidget(label_value, y, 1)
         layout.addWidget(button, y, 2)
 
-    def __init__(self, actuator_code, actuator_name, gcode, parent=None):
-        super().__init__(parent)
-        self.actuator_code = actuator_code
-        self.gcode = gcode
-        self.setWindowTitle(f'Настройка автоматики')
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gcode_auto = self.gcode.cycle_hard
+        self.code = self.gcode_auto.CODE
 
         layout = QVBoxLayout()
+        layout.addWidget(QLabel(f'Автоматика с резкой сменой периода для устройства "{self.actuator_name}"'))
+        layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
-
-        layout.addWidget(QLabel(f'Автоматика с резкой сменой периода для устройства "{actuator_name}"'))
-
-        layout.addWidget(QCheckBox('Включена'))
 
         for period_code, period_text in enumerate(('Включённое состояние', 'Выключенное состояние')):
             layout_grid = QGridLayout()
@@ -72,38 +89,36 @@ class AutoCycleHardWindow(QWidget):
             layout.addWidget(groupbox)
 
 
-class AutoCycleSoftWindow(QWidget):
-    CODE = 1
-
-    def btn_set_value_clicked(self, checked, period_code, text, label_value):
+class AutoCycleSoftWindow(BaseAutoWindow):
+    def btn_set_value_clicked(self, checked, period_code, text, label_value, what_set):
         dlg = SetValueDialog(self, text)
         if dlg.exec():
             value = dlg.input.text()
             label_value.setText(value)
-            self.gcode.cycle_soft.set_duration(self.actuator_code, period_code, value)
+            if what_set == 'duration':
+                self.gcode.cycle_soft.set_duration(self.actuator_code, period_code, value)
+            elif what_set == 'value':
+                self.gcode.cycle_soft.set_value(self.actuator_code, period_code, value)
 
     def build_btn_set_value(self, layout, period_code, text, y):
         label_value = QLabel('0')
 
         button = QPushButton('✎')
-        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, label_value))
+        what_set = 'value' if y else 'duration'
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, label_value, what_set))
 
         layout.addWidget(QLabel(text), y, 0)
         layout.addWidget(label_value, y, 1)
         layout.addWidget(button, y, 2)
 
-    def __init__(self, actuator_code, actuator_name, gcode, parent=None):
-        super().__init__(parent)
-        self.actuator_code = actuator_code
-        self.gcode = gcode
-        self.setWindowTitle(f'Настройка автоматики')
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gcode_auto = self.gcode.cycle_soft
 
         layout = QVBoxLayout()
+        layout.addWidget(QLabel(f'Автоматика с плавной сменой периода для устройства "{self.actuator_name}"'))
+        layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
-
-        layout.addWidget(QLabel(f'Автоматика с плавной сменой периода для устройства "{actuator_name}"'))
-
-        layout.addWidget(QCheckBox('Включена'))
 
         for period_code, period_text in enumerate(('Рассвет', 'День', 'Закат', 'Ночь')):
             layout_grid = QGridLayout()
@@ -116,6 +131,17 @@ class AutoCycleSoftWindow(QWidget):
 
             groupbox.setLayout(layout_grid)
             layout.addWidget(groupbox)
+
+
+class AutoClimateControlWindow(BaseAutoWindow):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gcode_auto = self.gcode.climate_control
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel(f'Автоматика с автоподстройкой значения для устройства "{self.actuator_name}"'))
+        layout.addWidget(self.checkbox_turn)
+        self.setLayout(layout)
 
 
 class MainWindow(QMainWindow):
@@ -157,13 +183,25 @@ class MainWindow(QMainWindow):
             label_value.setText(value)
             self.gcode.actuators[actuator_code].set(value)
 
-    def btn_open_auto_clicked(self, checked, window: QWidget.__class__, actuator_code: int, actuator_name: str):
-        window_key = (window.CODE, actuator_code)
+    def btn_open_auto_clicked(self, checked, gcode_auto, actuator_code: int, actuator_name: str):
+        auto_windows_classes = [AutoCycleHardWindow, AutoCycleSoftWindow, AutoClimateControlWindow]
+        window_class = auto_windows_classes[gcode_auto.CODE]
+        window_key = (gcode_auto.CODE, actuator_code)
         opened_window = self.auto_windows.get(window_key)
         if opened_window is None:
-            opened_window = window(actuator_code, actuator_name, self.gcode)
+            opened_window = window_class(actuator_code, actuator_name, self.gcode)
             self.auto_windows[window_key] = opened_window
             opened_window.show()
+
+    def btn_toggle_auto_clicked(self, checked, gcode_auto, actuator_code):
+        gcode_auto.turn(actuator_code, checked)
+
+    def btn_turn_off_all_autos_clicked(self, checked):
+        for checkbox in self.turn_checkboxes:
+            if checkbox.isChecked():
+                checkbox.setChecked(False)
+
+        self.gcode.turn_off_all_autos()
 
     def build_btn_set_value(self, layout, actuator_code, text, y):
         label_value = QLabel('0')
@@ -185,18 +223,25 @@ class MainWindow(QMainWindow):
         groupbox.setLayout(layout)
         return groupbox
 
-    def build_autos_layout(self, window, actuator_code, actuator_name):
+    def build_autos_layout(self, gcode_auto, actuator_code, actuator_name):
         button = QPushButton('✎')
-        button.clicked.connect(lambda s: self.btn_open_auto_clicked(s, window, actuator_code, actuator_name))
+        button.clicked.connect(lambda s: self.btn_open_auto_clicked(s, gcode_auto, actuator_code, actuator_name))
+
+        checkbox = QCheckBox()
+        checkbox.clicked.connect(lambda s: self.btn_toggle_auto_clicked(s, gcode_auto, actuator_code))
+        self.turn_checkboxes.append(checkbox)
 
         layout = QHBoxLayout()
-        layout.addWidget(QCheckBox())
+        layout.addWidget(checkbox)
         layout.addWidget(button)
         return layout
 
     def build_groupbox_autos(self):
         layout = QVBoxLayout()
-        layout.addWidget(QPushButton('Выключить всю автоматику'))
+
+        button_turn_off_all_autos = QPushButton('Выключить всю автоматику')
+        button_turn_off_all_autos.clicked.connect(self.btn_turn_off_all_autos_clicked)
+        layout.addWidget(button_turn_off_all_autos)
 
         layout_table = QGridLayout()
 
@@ -214,14 +259,9 @@ class MainWindow(QMainWindow):
         for row_index, (actuator_name, actuator_code) in enumerate(actuators, 1):
             layout_table.addWidget(QLabel(actuator_name), row_index, 0)
 
-            autos_layout_hard = self.build_autos_layout(AutoCycleHardWindow, actuator_code, actuator_name)
-            layout_table.addLayout(autos_layout_hard, row_index, 1)
-
-            autos_layout_soft = self.build_autos_layout(AutoCycleSoftWindow, actuator_code, actuator_name)
-            layout_table.addLayout(autos_layout_soft, row_index, 2)
-
-            autos_layout_cc = self.build_autos_layout(AutoCycleHardWindow, actuator_code, actuator_name)
-            layout_table.addLayout(autos_layout_cc, row_index, 3)
+            for column_index, (_, gcode_auto) in enumerate(self.gcode.autos.items(), 1):
+                autos_layout_hard = self.build_autos_layout(gcode_auto, actuator_code, actuator_name)
+                layout_table.addLayout(autos_layout_hard, row_index, column_index)
 
         layout.addLayout(layout_table)
 
@@ -232,6 +272,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.auto_windows = {}
+        self.turn_checkboxes = []
         self.gcode = GrowboxGCodeBuilder()
 
         self.setWindowTitle('CNC Growbox')

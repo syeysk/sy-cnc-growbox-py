@@ -55,6 +55,7 @@ class Sensor:
 
 
 class AutoCycleHard:
+    CODE = 0
     # Periods
     DAY = 1
     NIGHT = 0
@@ -73,6 +74,7 @@ class AutoCycleHard:
 
 
 class AutoCycleSoft:
+    CODE = 1
     # Periods
     SUNRISE = 0
     DAY = 1
@@ -90,6 +92,16 @@ class AutoCycleSoft:
 
     def set_value(self, actuator: Actuator | int | str, period: int, value: int):
         return self.output.write(f'E153 A{actuator} P{period} V{value}')
+
+
+class AutoClimateControl:
+    CODE = 2
+
+    def __init__(self, output: WriterInterface):
+        self.output = output
+
+    def turn(self, actuator: Actuator | int | str, status: bool):
+        return self.output.write(f'E200 A{actuator} B{int(status)}')
 
 
 class GrowboxGCodeBuilder:
@@ -114,11 +126,21 @@ class GrowboxGCodeBuilder:
 
         self.s_temperature = Sensor(0, self.output)
         self.s_humid = Sensor(1, self.output)
+        self.sensors = {
+            self.s_temperature.code: self.s_temperature,
+            self.s_humid.code: self.s_humid,
+        }
 
         self.cycle_hard = AutoCycleHard(self.output)
         self.cycle_soft = AutoCycleSoft(self.output)
+        self.climate_control = AutoClimateControl(self.output)
+        self.autos = {
+            self.cycle_hard.CODE: self.cycle_hard,
+            self.cycle_soft.CODE: self.cycle_soft,
+            self.climate_control.CODE: self.climate_control,
+        }
 
-    def turn_off_all_auto(self):
+    def turn_off_all_autos(self):
         return self.output.write('E3')
 
     # E4
