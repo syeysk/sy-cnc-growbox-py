@@ -1,13 +1,15 @@
 import json
-import os.path
 import sys
+from pathlib import Path
 
+import serial
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
-    QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QMenuBar,
+    QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QTextEdit,
 )
+from serial.tools.list_ports import comports
 
 from gcode_builder import GrowboxGCodeBuilder
 
@@ -17,10 +19,10 @@ class SetValueDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f'Новое значение для "{text}"')
 
-        QBtn = QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel
-        buttonBox = QDialogButtonBox(QBtn)
-        buttonBox.clicked.connect(self.accept)
-        buttonBox.rejected.connect(self.reject)
+        buttons = QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel
+        button_box = QDialogButtonBox(buttons)
+        button_box.clicked.connect(self.accept)
+        button_box.rejected.connect(self.reject)
 
         layout = QVBoxLayout()
         self.input = input_widget
@@ -30,7 +32,7 @@ class SetValueDialog(QDialog):
             self.input.setText(initial_value)
 
         layout.addWidget(self.input)
-        layout.addWidget(buttonBox)
+        layout.addWidget(button_box)
         self.setLayout(layout)
 
 
@@ -69,9 +71,9 @@ class AutoCycleHardWindow(BaseAutoWindow):
             value = dlg.input.text()
             label_value.setText(value)
             if what_set == 'duration':
-                self.gcode.cycle_hard.set_duration(self.actuator_code, period_code, value)
+                self.gcode_auto.set_duration(self.actuator_code, period_code, value)
             elif what_set == 'value':
-                self.gcode.cycle_hard.set_value(self.actuator_code, period_code, value)
+                self.gcode_auto.set_value(self.actuator_code, period_code, value)
 
     def build_btn_set_value(self, layout, period_code, text, y, value):
         label_value = QLabel(value)
@@ -110,9 +112,9 @@ class AutoCycleSoftWindow(BaseAutoWindow):
             value = dlg.input.text()
             label_value.setText(value)
             if what_set == 'duration':
-                self.gcode.cycle_soft.set_duration(self.actuator_code, period_code, value)
+                self.gcode_auto.set_duration(self.actuator_code, period_code, value)
             elif what_set == 'value':
-                self.gcode.cycle_soft.set_value(self.actuator_code, period_code, value)
+                self.gcode_auto.set_value(self.actuator_code, period_code, value)
 
     def build_btn_set_value(self, layout, period_code, text, y, value):
         label_value = QLabel(value)
@@ -203,15 +205,15 @@ class AutoClimateControlWindow(BaseAutoWindow):
             if what_set == 'min':
                 value = dlg.input.text()
                 label_value.setText(value)
-                self.gcode.climate_control.set_min(self.actuator_code, value)
+                self.gcode_auto.set_min(self.actuator_code, value)
             elif what_set == 'max':
                 value = dlg.input.text()
                 label_value.setText(value)
-                self.gcode.climate_control.set_max(self.actuator_code, value)
+                self.gcode_auto.set_max(self.actuator_code, value)
             elif what_set == 'sensor':
                 value = dlg.input.currentItem()
                 label_value.setText(value.text())
-                self.gcode.climate_control.set_sensor(self.actuator_code, value.data(Qt.ItemDataRole.UserRole))
+                self.gcode_auto.set_sensor(self.actuator_code, value.data(Qt.ItemDataRole.UserRole))
 
 
 class YesNoDialog(QDialog):
@@ -232,8 +234,14 @@ class YesNoDialog(QDialog):
 
 
 class MainPanelWindow(QMainWindow):
+    def closeEvent(self, *args, **kwargs):
+        super().closeEvent(*args, **kwargs)
+        if self.serial:
+            self.serial.close()
+
     def btn_save_gcode(self, checked):
-        file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение G-кода', '', '*.gcode')
+        default_file_name = self.file_path.stem if self.file_path else ''
+        file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение G-кода', default_file_name, '*.gcode')
         # if os.path.exists(file_path):
         #     dlg = YesNoDialog(
         #         self,
@@ -249,32 +257,37 @@ class MainPanelWindow(QMainWindow):
                 temp_gcode.buff2gcode()
 
     def btn_save_json(self, checked):
-        file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение JSON', '', '*.json')
+        default_file_name = self.file_path.stem if self.file_path else ''
+        file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение JSON', default_file_name, '*.json')
         if file_path:
             with open(file_path, 'w') as output_file:
                 json.dump(self.gcode.buff_json, output_file)
 
     def start_menubar(self):
         menu = self.menuBar()
-        button_action_save = QAction('Сохранить как G-код', self)
-        button_action_save.triggered.connect(self.btn_save_gcode)
-        button_action_save_json = QAction('Сохранить как JSON', self)
-        button_action_save_json.triggered.connect(self.btn_save_json)
-        # button_action_send_gcode = QAction('Открыть из файла и послать в гроубокс', self)
-
         menu_file = menu.addMenu('Файл')
-        # menu_file.addAction(button_action_send_gcode)
-        menu_file.addAction(button_action_save)
-        menu_file.addAction(button_action_save_json)
+
+        if self.open_type in ('open', 'create'):
+            button_action_save = QAction('Сохранить как G-код', self)
+            button_action_save.triggered.connect(self.btn_save_gcode)
+            button_action_save_json = QAction('Сохранить как JSON', self)
+            button_action_save_json.triggered.connect(self.btn_save_json)
+            menu_file.addAction(button_action_save)
+            menu_file.addAction(button_action_save_json)
+        if self.open_type == 'connect':
+            button_action_send_json = QAction('Открыть JSON и послать в гроубокс', self)
+            button_action_send_gcode = QAction('Открыть G-код и послать в гроубокс', self)
+            menu_file.addAction(button_action_send_json)
+            menu_file.addAction(button_action_send_gcode)
 
     def build_groupbox_sensors(self):
         layout = QGridLayout()
 
         layout.addWidget(QLabel('Влажность:'), 0, 0)
-        layout.addWidget(QLabel('75%'), 0, 1)
+        layout.addWidget(QLabel('-'), 0, 1)
 
         layout.addWidget(QLabel('Температура:'), 1, 0)
-        layout.addWidget(QLabel('25С'), 1, 1)
+        layout.addWidget(QLabel('-'), 1, 1)
 
         groupbox = QGroupBox('Показания датчиков')
         groupbox.setLayout(layout)
@@ -285,7 +298,9 @@ class MainPanelWindow(QMainWindow):
         if dlg.exec():
             value = dlg.input.text()
             label_value.setText(value)
-            self.gcode.actuators[actuator_code].set(value)
+            answer = self.gcode.actuators[actuator_code].set(value)
+            # if self.text_status:
+            #     self.text_status.setPlainText(answer.decode())
 
     def btn_open_auto_clicked(self, checked, gcode_auto, actuator_code: int, actuator_name: str):
         auto_windows_classes = {
@@ -315,7 +330,9 @@ class MainPanelWindow(QMainWindow):
                     if actuator_data.get('turn'):
                         actuator_data['turn'] = False
 
-        self.gcode.turn_off_all_autos()
+        answer = self.gcode.turn_off_all_autos()
+        # if self.text_status:
+        #     self.text_status.setPlainText(answer.decode())
 
     def build_btn_set_value(self, layout, actuator_code: int, text, y):
         default_value = self.gcode.actuators[actuator_code].DEFAULT_VALUE
@@ -386,15 +403,38 @@ class MainPanelWindow(QMainWindow):
         groupbox.setLayout(layout)
         return groupbox
 
-    def __init__(self, open_type, open_subtype, file_path, buff_json):
+    def print_answer(self, answer: bytes):
+        if self.text_status:
+            self.text_status.setPlainText(answer.decode())
+
+    def __init__(
+            self,
+            open_type: str,
+            open_subtype: str | None,
+            file_path: Path | None = None,
+            data: dict | None = None,
+    ):
         super().__init__()
+        self.serial = None
+        self.text_status = None
         self.auto_windows = {}
         self.turn_checkboxes = {}
 
+        self.open_type = open_type
+        self.file_path = file_path
         if open_type == 'open' and open_subtype == 'json':
-            self.gcode = GrowboxGCodeBuilder(buff_to_json=True, buff_json=buff_json)
+            with file_path.open() as json_file:
+                self.gcode = GrowboxGCodeBuilder(buff_to_json=True, buff_json=json.load(json_file))
         elif open_type == 'create':
             self.gcode = GrowboxGCodeBuilder(buff_to_json=True)
+        elif open_type == 'connect' and open_subtype == 'serial':
+            self.serial = serial.Serial(
+                str(file_path),
+                baudrate=data['baudrate'],
+                timeout=data['timeout_read'],
+                write_timeout=data['timeout_write'],
+            )
+            self.gcode = GrowboxGCodeBuilder(self.serial, buff_to_json=True, callback_answer=self.print_answer)
 
         self.setWindowTitle('CNC Growbox')
         layout = QVBoxLayout()
@@ -409,13 +449,62 @@ class MainPanelWindow(QMainWindow):
         groupbox_autos = self.build_groupbox_autos()
         layout.addWidget(groupbox_autos)
 
-        layout.addWidget(QLabel('Секунд с момента включения:'))
-        layout.addWidget(QPushButton('Обновить показания'))
+        if open_type == 'connect':
+            # layout.addWidget(QLabel('Секунд с момента включения:'))
+            # layout.addWidget(QPushButton('Обновить показания'))
+            self.text_status = QTextEdit()
+            self.text_status.setReadOnly(True)
+            layout.addWidget(self.text_status)
+            self.print_answer(self.serial.read(100))
 
         widget = QWidget()
         widget.setLayout(layout)
 
         self.setCentralWidget(widget)
+
+
+class SelectSerialPortDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f'Подключение к гроубоксу')
+
+        buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        button_box = QDialogButtonBox(buttons)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+
+        layout = QVBoxLayout()
+
+        self.input_port = QListWidget()
+        for index, (port, desc, hwid) in enumerate(comports()):
+            widget_item_port = QListWidgetItem(port, self.input_port)
+            widget_item_port.setData(Qt.ItemDataRole.UserRole, port)
+            if not index:
+                widget_item_port.setSelected(True)
+
+        self.input_baudrate = QListWidget()
+        for baudrate in [4800, 9600, 19200, 38400, 76800, 153600]:
+            widget_item_baudrate = QListWidgetItem(str(baudrate), self.input_baudrate)
+            widget_item_baudrate.setData(Qt.ItemDataRole.UserRole, baudrate)
+            # if baudrate == 9600:
+            #     widget_item_baudrate.setSelected(True)
+
+        self.input_timeout_read = QLineEdit('2.2')
+        self.input_timeout_write = QLineEdit('0.1')
+
+        layout_grid = QGridLayout()
+        layout_grid.addWidget(QLabel('Таймаут на чтение:'), 0, 0)
+        layout_grid.addWidget(self.input_timeout_read, 0, 1)
+        layout_grid.addWidget(QLabel('Таймаут на запись:'), 1, 0)
+        layout_grid.addWidget(self.input_timeout_write, 1, 1)
+
+        layout.addWidget(QLabel('Выберите последовательный порт:'))
+        layout.addWidget(self.input_port)
+        layout.addWidget(QLabel('Выберите скорость:'))
+        layout.addWidget(self.input_baudrate)
+        layout.addLayout(layout_grid)
+        layout.addWidget(button_box)
+        self.setLayout(layout)
 
 
 class MainWindow(QMainWindow):
@@ -430,17 +519,40 @@ class MainWindow(QMainWindow):
     def btn_open_json_clicked(self, checked):
         file_path, mask = QFileDialog.getOpenFileName(self, 'Открытие JSON', '~', '*.json')
         if file_path:
-            with open(file_path) as file:
-                buff_json = json.load(file)
-
-            window = MainPanelWindow('open', 'json', file_path=file_path, buff_json=buff_json)
+            window = MainPanelWindow('open', 'json', file_path=Path(file_path))
             self.main_panel_windows.append(window)
             window.show()
 
     def btn_create_gcode_clicked(self, checked):
-        window = MainPanelWindow('create', None, file_path=None, buff_json=None)
+        window = MainPanelWindow('create', None, file_path=None)
         self.main_panel_windows.append(window)
         window.show()
+
+    def btn_connect_serial_clicked(self, checked):
+        dlg = SelectSerialPortDialog()
+        if dlg.exec():
+            port, baudrate, timeout_read, timeout_write = None, None, None, None
+            current_item_port = dlg.input_port.currentItem()
+            if current_item_port:
+                port = current_item_port.data(Qt.ItemDataRole.UserRole)
+
+            current_item_baudrate = dlg.input_baudrate.currentItem()
+            if current_item_baudrate:
+                baudrate = current_item_baudrate.data(Qt.ItemDataRole.UserRole)
+
+            timeout_read = float(dlg.input_timeout_read.text())
+            timeout_write = float(dlg.input_timeout_write.text())
+            print(port, baudrate, timeout_read, timeout_write)
+            if port and baudrate and timeout_read and timeout_write:
+                data = {
+                    'port': port,
+                    'baudrate': baudrate,
+                    'timeout_read': timeout_read,
+                    'timeout_write': timeout_write,
+                }
+                window = MainPanelWindow('connect', 'serial', file_path=Path(port), data=data)
+                self.main_panel_windows.append(window)
+                window.show()
 
     def __init__(self):
         super().__init__()
@@ -448,26 +560,25 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('CNC Growbox')
         layout = QVBoxLayout()
 
-        button = QPushButton('Создать новый')
+        button = QPushButton('Создать управляющую программу')
         button.clicked.connect(self.btn_create_gcode_clicked)
         layout.addWidget(button)
 
-        # button = QPushButton('Открыть G-код')
+        button = QPushButton('Открыть G-код')
         # button.clicked.connect(self.btn_open_gcode_clicked)
-        # layout.addWidget(button)
+        layout.addWidget(button)
 
         button = QPushButton('Открыть JSON')
         button.clicked.connect(self.btn_open_json_clicked)
         layout.addWidget(button)
 
         button = QPushButton('Подключиться по Serial')
-        # button.clicked.connect(self.btn_connect_serial_clicked)
+        button.clicked.connect(self.btn_connect_serial_clicked)
         layout.addWidget(button)
 
         button = QPushButton('Подключиться по HTTP')
         # button.clicked.connect(self.btn_connect_http_clicked)
         layout.addWidget(button)
-
 
         widget = QWidget()
         widget.setLayout(layout)

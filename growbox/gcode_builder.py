@@ -5,14 +5,16 @@ import serial
 
 
 class WriterInterface:
-    def __init__(self, output, need_wait_answer: bool | None = None):
+    def __init__(self, output, need_wait_answer: bool | None = None, callback_answer=None):
         self.output = output
+        self.callback_answer = callback_answer
         if need_wait_answer is None:
             self.need_wait_answer = isinstance(output, serial.Serial)
         else:
             self.need_wait_answer = need_wait_answer
 
     def write(self, data: str):
+        answer = None
         data = f'{data}\n'
         mode = getattr(self.output, 'mode', 'wb')
         encoding = getattr(self.output, 'encoding', 'utf-8')
@@ -22,9 +24,11 @@ class WriterInterface:
 
         self.output.write(data)
         if self.need_wait_answer:
-            return self.output.read(100)
+            answer = self.output.read(100)
+            if self.callback_answer:
+                self.callback_answer(answer)
 
-        return None
+        return answer
 
 
 class Actuator:
@@ -216,11 +220,17 @@ class GrowboxGCodeBuilder:
     A_WHITE_LIGHT = 2
     A_FRED_LIGHT = 3
 
-    def __init__(self, output: io.TextIOWrapper | serial.Serial = sys.stdout, buff_to_json=False, buff_json=None):
+    def __init__(
+            self,
+            output: io.TextIOWrapper | serial.Serial = sys.stdout,
+            buff_to_json=False,
+            buff_json=None,
+            callback_answer=None,
+    ):
         self.buff_json = {} if buff_json is None else buff_json
         self.buff_to_json = buff_to_json
 
-        self.output = WriterInterface(output)
+        self.output = WriterInterface(output, callback_answer=callback_answer)
 
         self.a_humid = Actuator(self.A_HUMID, self.output, self.buff_json, self.buff_to_json)
         self.a_extractor = Actuator(self.A_EXTRACTOR, self.output, self.buff_json, self.buff_to_json)
