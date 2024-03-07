@@ -1,10 +1,12 @@
+import json
+import os.path
 import sys
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
-    QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog
+    QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QMenuBar,
 )
 
 from gcode_builder import GrowboxGCodeBuilder
@@ -229,7 +231,7 @@ class YesNoDialog(QDialog):
         self.setLayout(layout)
 
 
-class MainWindow(QMainWindow):
+class MainPanelWindow(QMainWindow):
     def btn_save_gcode(self, checked):
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение G-кода', '', '*.gcode')
         # if os.path.exists(file_path):
@@ -241,34 +243,29 @@ class MainWindow(QMainWindow):
         #     )
         #     if not dlg.exec():
         #         return
+        if file_path:
+            with open(file_path, 'w') as output_file:
+                temp_gcode = GrowboxGCodeBuilder(output_file, buff_json=self.gcode.buff_json)
+                temp_gcode.buff2gcode()
 
-        with open(file_path, 'w') as output_file:
-            temp_gcode = GrowboxGCodeBuilder(output_file, buff_json=self.gcode.buff_json)
-            temp_gcode.buff2gcode()
-
-    def btn_open_gcode(self, checked):
-        file_name, mask = QFileDialog.getOpenFileName(self, 'Открытие G-кода', '~', '*.gcode')
-        print(file_name, mask)
+    def btn_save_json(self, checked):
+        file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение JSON', '', '*.json')
+        if file_path:
+            with open(file_path, 'w') as output_file:
+                json.dump(self.gcode.buff_json, output_file)
 
     def start_menubar(self):
         menu = self.menuBar()
-
-        button_action_open = QAction('Открыть из файла', self)
-        button_action_open.triggered.connect(self.btn_open_gcode)
-        button_action_save = QAction('Сохранить в файл', self)
+        button_action_save = QAction('Сохранить как G-код', self)
         button_action_save.triggered.connect(self.btn_save_gcode)
-        button_action_connect_by_serial = QAction('Добавить по Serial', self)
-        button_action_connect_by_web = QAction('Добавить по WEB', self)
-        button_action_send_gcode = QAction('Открыть из файла и послать в гроубокс', self)
+        button_action_save_json = QAction('Сохранить как JSON', self)
+        button_action_save_json.triggered.connect(self.btn_save_json)
+        # button_action_send_gcode = QAction('Открыть из файла и послать в гроубокс', self)
 
-        menu_file = menu.addMenu('G-code')
-        menu_file.addAction(button_action_open)
-        menu_file.addAction(button_action_send_gcode)
+        menu_file = menu.addMenu('Файл')
+        # menu_file.addAction(button_action_send_gcode)
         menu_file.addAction(button_action_save)
-
-        menu_connect = menu.addMenu('Гроубоксы')
-        menu_connect.addAction(button_action_connect_by_serial)
-        menu_connect.addAction(button_action_connect_by_web)
+        menu_file.addAction(button_action_save_json)
 
     def build_groupbox_sensors(self):
         layout = QGridLayout()
@@ -320,8 +317,10 @@ class MainWindow(QMainWindow):
 
         self.gcode.turn_off_all_autos()
 
-    def build_btn_set_value(self, layout, actuator_code, text, y):
-        label_value = QLabel(str(self.gcode.actuators[int(actuator_code)].DEFAULT_VALUE))
+    def build_btn_set_value(self, layout, actuator_code: int, text, y):
+        default_value = self.gcode.actuators[actuator_code].DEFAULT_VALUE
+        value = self.gcode.buff_json.get('actuators', {}).get(str(actuator_code), {}).get('value', default_value)
+        label_value = QLabel(str(value))
 
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, actuator_code, text, label_value))
@@ -345,6 +344,7 @@ class MainWindow(QMainWindow):
         button.clicked.connect(lambda s: self.btn_open_auto_clicked(s, gcode_auto, actuator_code, actuator_name))
 
         checkbox = QCheckBox()
+        checkbox.setChecked(gcode_auto.buff_json.get(str(actuator_code), {}).get('turn', False))
         checkbox.clicked.connect(lambda s: self.btn_toggle_auto_clicked(s, gcode_auto, actuator_code))
         self.turn_checkboxes[f'{gcode_auto.CODE}-{actuator_code}'] = checkbox
 
@@ -386,14 +386,19 @@ class MainWindow(QMainWindow):
         groupbox.setLayout(layout)
         return groupbox
 
-    def __init__(self):
+    def __init__(self, open_type, open_subtype, file_path, buff_json):
         super().__init__()
         self.auto_windows = {}
         self.turn_checkboxes = {}
-        self.gcode = GrowboxGCodeBuilder(buff_to_json=True)
+
+        if open_type == 'open' and open_subtype == 'json':
+            self.gcode = GrowboxGCodeBuilder(buff_to_json=True, buff_json=buff_json)
+        elif open_type == 'create':
+            self.gcode = GrowboxGCodeBuilder(buff_to_json=True)
 
         self.setWindowTitle('CNC Growbox')
         layout = QVBoxLayout()
+        self.start_menubar()
 
         groupbox_sensors = self.build_groupbox_sensors()
         layout.addWidget(groupbox_sensors)
@@ -412,7 +417,62 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(widget)
 
-        self.start_menubar()
+
+class MainWindow(QMainWindow):
+    def btn_open_gcode_clicked(self, checked):
+        pass
+        # file_path, mask = QFileDialog.getOpenFileName(self, 'Открытие G-кода', '~', '*.gcode')
+        # print(file_path, mask)
+        # window = MainPanelWindow()
+        # self.main_panel_windows.append(window)
+        # window.show()
+
+    def btn_open_json_clicked(self, checked):
+        file_path, mask = QFileDialog.getOpenFileName(self, 'Открытие JSON', '~', '*.json')
+        if file_path:
+            with open(file_path) as file:
+                buff_json = json.load(file)
+
+            window = MainPanelWindow('open', 'json', file_path=file_path, buff_json=buff_json)
+            self.main_panel_windows.append(window)
+            window.show()
+
+    def btn_create_gcode_clicked(self, checked):
+        window = MainPanelWindow('create', None, file_path=None, buff_json=None)
+        self.main_panel_windows.append(window)
+        window.show()
+
+    def __init__(self):
+        super().__init__()
+        self.main_panel_windows = []
+        self.setWindowTitle('CNC Growbox')
+        layout = QVBoxLayout()
+
+        button = QPushButton('Создать новый')
+        button.clicked.connect(self.btn_create_gcode_clicked)
+        layout.addWidget(button)
+
+        # button = QPushButton('Открыть G-код')
+        # button.clicked.connect(self.btn_open_gcode_clicked)
+        # layout.addWidget(button)
+
+        button = QPushButton('Открыть JSON')
+        button.clicked.connect(self.btn_open_json_clicked)
+        layout.addWidget(button)
+
+        button = QPushButton('Подключиться по Serial')
+        # button.clicked.connect(self.btn_connect_serial_clicked)
+        layout.addWidget(button)
+
+        button = QPushButton('Подключиться по HTTP')
+        # button.clicked.connect(self.btn_connect_http_clicked)
+        layout.addWidget(button)
+
+
+        widget = QWidget()
+        widget.setLayout(layout)
+
+        self.setCentralWidget(widget)
 
 
 def run():

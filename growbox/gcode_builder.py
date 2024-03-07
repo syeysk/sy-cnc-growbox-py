@@ -33,7 +33,7 @@ class Actuator:
     def __init__(self, code: int, output: WriterInterface, buff_json, buff_to_json):
         self.code = code
         self.output = output
-        self.buff_json = buff_json.setdefault('actuators', {}).setdefault(code, {})
+        self.buff_json = buff_json.setdefault('actuators', {}).setdefault(str(code), {})
         self.buff_to_json = buff_to_json
 
     def __str__(self):
@@ -76,7 +76,7 @@ class AutoCycleHard:
 
     def __init__(self, output: WriterInterface, buff_json, buff_to_json):
         self.output = output
-        self.buff_json = buff_json.setdefault(self.CODE, {})
+        self.buff_json = buff_json.setdefault(str(self.CODE), {})
         self.buff_to_json = buff_to_json
 
     def turn(self, actuator: Actuator | int | str, status: bool):
@@ -125,7 +125,7 @@ class AutoCycleSoft:
 
     def __init__(self, output: WriterInterface, buff_json, buff_to_json):
         self.output = output
-        self.buff_json = buff_json.setdefault(self.CODE, {})
+        self.buff_json = buff_json.setdefault(str(self.CODE), {})
         self.buff_to_json = buff_to_json
 
     def turn(self, actuator: Actuator | int | str, status: bool):
@@ -168,7 +168,7 @@ class AutoClimateControl:
 
     def __init__(self, output: WriterInterface, buff_json, buff_to_json):
         self.output = output
-        self.buff_json = buff_json.setdefault(self.CODE, {})
+        self.buff_json = buff_json.setdefault(str(self.CODE), {})
         self.buff_to_json = buff_to_json
 
     def turn(self, actuator: Actuator | int | str, status: bool):
