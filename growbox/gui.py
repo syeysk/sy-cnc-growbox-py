@@ -159,7 +159,7 @@ class AutoClimateControlWindow(BaseAutoWindow):
         layout_grid = QGridLayout()
         layout.addLayout(layout_grid)
 
-        text = 'Мин. допустимое значение'
+        text = 'Мин. допустимое значение:'
         label_value_min = QLabel('0')
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, label_value_min, 'min'))
@@ -167,7 +167,7 @@ class AutoClimateControlWindow(BaseAutoWindow):
         layout_grid.addWidget(label_value_min, 0, 1)
         layout_grid.addWidget(button, 0, 2)
 
-        text = 'Макс. допустимое значение'
+        text = 'Макс. допустимое значение:'
         label_value_max = QLabel('0')
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, label_value_max, 'max'))
@@ -175,7 +175,7 @@ class AutoClimateControlWindow(BaseAutoWindow):
         layout_grid.addWidget(label_value_max, 1, 1)
         layout_grid.addWidget(button, 1, 2)
 
-        text = 'Датчик'
+        text = 'Датчик:'
         label_value_sensor = QLabel(self.sensors[0])
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, label_value_sensor, 'sensor'))

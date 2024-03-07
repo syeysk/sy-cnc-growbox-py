@@ -18,8 +18,8 @@ To use the python-api interface:
 from growbox.gcode_builder import GrowboxGCodeBuilder
 
 gcode = GrowboxGCodeBuilder()
-gcode.a_white_light.set(255)
-gcode.s_temperature.get()
+gcode.a_white_light.set(255)  # G-code will print to console
+gcode.s_temperature.get()  # G-code will print to console
 ```
 
 or
@@ -38,8 +38,8 @@ for port, desc, hwid in comports():
 with serial.Serial(port, baudrate=9600, timeout=2, write_timeout=0.1) as opened_serial:
     gcode = GrowboxGCodeBuilder(opened_serial)
     print(opened_serial.read(100))
-    print(gcode.a_white_light.set(255))
-    print(gcode.s_temperature.get())
+    print(gcode.a_white_light.set(255))  # G-code will send to serial port
+    print(gcode.s_temperature.get())  # G-code will send to serial port
 ```
 
 ## Use GUI
