@@ -8,6 +8,7 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
     QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QTextEdit,
+    QProgressBar, QStatusBar
 )
 from serial.tools.list_ports import comports
 
@@ -256,12 +257,20 @@ class MainPanelWindow(QMainWindow):
                 temp_gcode = GrowboxGCodeBuilder(output_file, buff_json=self.gcode.buff_json)
                 temp_gcode.buff2gcode()
 
+            if not self.file_path:
+                self.file_path = Path(file_path)
+                self.print_to_status_bar(str(file_path), 1)
+
     def btn_save_json(self, checked):
         default_file_name = self.file_path.stem if self.file_path else ''
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение JSON', default_file_name, '*.json')
         if file_path:
             with open(file_path, 'w') as output_file:
                 json.dump(self.gcode.buff_json, output_file)
+
+            if not self.file_path:
+                self.file_path = Path(file_path)
+                self.print_to_status_bar(str(file_path), 1)
 
     def start_menubar(self):
         menu = self.menuBar()
@@ -407,6 +416,17 @@ class MainPanelWindow(QMainWindow):
         if self.text_status:
             self.text_status.setPlainText(answer.decode())
 
+    def print_to_status_bar(self, message, status=0):
+        if status == 0:
+            self.statusBar().showMessage(message)
+        elif status == 1:
+            cutted_message = message if len(message) < 40 else f'{message[:19]}...{message[-18:]}'
+            if not self.progress_bar:
+                self.progress_bar = QLabel()
+                self.statusBar().addPermanentWidget(self.progress_bar)
+
+            self.progress_bar.setText(cutted_message)
+
     def __init__(
             self,
             open_type: str,
@@ -417,17 +437,21 @@ class MainPanelWindow(QMainWindow):
         super().__init__()
         self.serial = None
         self.text_status = None
+        self.progress_bar = None
         self.auto_windows = {}
         self.turn_checkboxes = {}
 
         self.open_type = open_type
         self.file_path = file_path
         if open_type == 'open' and open_subtype == 'json':
+            self.print_to_status_bar(str(file_path), 1)
             with file_path.open() as json_file:
                 self.gcode = GrowboxGCodeBuilder(buff_to_json=True, buff_json=json.load(json_file))
         elif open_type == 'create':
+            self.print_to_status_bar('Новый файл', 1)
             self.gcode = GrowboxGCodeBuilder(buff_to_json=True)
         elif open_type == 'connect' and open_subtype == 'serial':
+            self.print_to_status_bar(str(file_path), 1)
             self.serial = serial.Serial(
                 str(file_path),
                 baudrate=data['baudrate'],
@@ -542,7 +566,6 @@ class MainWindow(QMainWindow):
 
             timeout_read = float(dlg.input_timeout_read.text())
             timeout_write = float(dlg.input_timeout_write.text())
-            print(port, baudrate, timeout_read, timeout_write)
             if port and baudrate and timeout_read and timeout_write:
                 data = {
                     'port': port,
