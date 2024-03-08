@@ -1,0 +1,1 @@
+{"actuators": {"0": {}, "1": {}, "2": {}, "3": {}}, "0": {"1": {"turn": true, "0": {"duration": "1", "value": "255"}, "1": {"duration": "719"}}}, "1": {"2": {"turn": true, "1": {"duration": "840", "value": "255"}, "3": {"duration": "600", "value": "0"}}}, "2": {"0": {"turn": true, "min": "70", "max": "75", "sensor": "1"}}}

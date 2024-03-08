@@ -98,7 +98,7 @@ class AutoCycleHardWindow(BaseAutoWindow):
             layout_grid = QGridLayout()
             groupbox = QGroupBox(period_text)
 
-            period_json = self.actuator_json.get(period_code, {})
+            period_json = self.actuator_json.get(str(period_code), {})
             self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, period_json.get('duration', '0'))
             self.build_btn_set_value(layout_grid, period_code, 'Значение:', 1, period_json.get('value', '0'))
 
@@ -139,7 +139,7 @@ class AutoCycleSoftWindow(BaseAutoWindow):
             layout_grid = QGridLayout()
             groupbox = QGroupBox(period_text)
 
-            period_json = self.actuator_json.get(period_code, {})
+            period_json = self.actuator_json.get(str(period_code), {})
             self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, period_json.get('duration', '0'))
             if period_code % 2 != 0:
                 self.build_btn_set_value(layout_grid, period_code, 'Значение:', 1, period_json.get('value', '0'))
@@ -464,8 +464,8 @@ class MainPanelWindow(QMainWindow):
         layout = QVBoxLayout()
         self.start_menubar()
 
-        groupbox_sensors = self.build_groupbox_sensors()
-        layout.addWidget(groupbox_sensors)
+        if open_type == 'connect':
+            layout.addWidget(self.build_groupbox_sensors())
 
         groupbox_actuators = self.build_groupbox_actuators()
         layout.addWidget(groupbox_actuators)
