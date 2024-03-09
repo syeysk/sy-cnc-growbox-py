@@ -95,6 +95,11 @@ class AutoCycleHard:
     def turn(self, actuator: Actuator | int | str, status: bool):
         return self.output.write(f'E100 A{actuator} B{int(status)}')
 
+    def is_turn(self, actuator: Actuator | int | str) -> bool:
+        answer = self.output.write(f'E1001 A{actuator}')
+        answer_lines = answer.decode().split('\r\n')
+        return bool(float(answer_lines[0][2:]))
+
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E101 A{actuator} B{period} D{duration}')
 
@@ -121,6 +126,11 @@ class AutoCycleSoft:
     def turn(self, actuator: Actuator | int | str, status: bool):
         return self.output.write(f'E150 A{actuator} B{int(status)}')
 
+    def is_turn(self, actuator: Actuator | int | str) -> bool:
+        answer = self.output.write(f'E1501 A{actuator}')
+        answer_lines = answer.decode().split('\r\n')
+        return bool(float(answer_lines[0][2:]))
+
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E151 A{actuator} P{period} D{duration}')
 
@@ -140,6 +150,11 @@ class AutoClimateControl:
     # @dec('E200', 'climate_control_turn', a='actuator', b='status')
     def turn(self, actuator: Actuator | int | str, status: bool):
         return self.output.write(f'E200 A{actuator} B{int(status)}')
+
+    def is_turn(self, actuator: Actuator | int | str) -> bool:
+        answer = self.output.write(f'E2001 A{actuator}')
+        answer_lines = answer.decode().split('\r\n')
+        return bool(float(answer_lines[0][2:]))
 
     def set_min(self, actuator: Actuator | int | str, value: int):
         return self.output.write(f'E202 A{actuator} V{value}')

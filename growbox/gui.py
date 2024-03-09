@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import serial
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QRunnable, pyqtSlot, QThreadPool, QObject, pyqtSignal
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
@@ -307,6 +307,34 @@ class YesNoDialog(QDialog):
         self.setLayout(layout)
 
 
+class WorkerSignals(QObject):
+    finished = pyqtSignal()
+    error = pyqtSignal(tuple)
+    result = pyqtSignal(object)
+
+
+class Worker(QRunnable):
+    def __init__(self, fn, *args, **kwargs):
+        super(Worker, self).__init__()
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+        except Exception:
+            # traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            self.signals.error.emit((exctype, value))#, traceback.format_exc()))
+        else:
+            self.signals.result.emit(result)  # Return the result of the processing
+        finally:
+            self.signals.finished.emit()  # Done
+
+
 class MainPanelWindow(QMainWindow):
     def closeEvent(self, *args, **kwargs):
         super().closeEvent(*args, **kwargs)
@@ -379,9 +407,7 @@ class MainPanelWindow(QMainWindow):
         if dlg.exec():
             value = dlg.input.text()
             label_value.setText(value)
-            answer = self.gcode.actuators[actuator_code].set(value)
-            # if self.text_status:
-            #     self.text_status.setPlainText(answer.decode())
+            self.gcode.actuators[actuator_code].set(value)
 
     def btn_open_auto_clicked(self, checked, gcode_auto, actuator_code: int, actuator_name: str):
         auto_windows_classes = {
@@ -411,9 +437,7 @@ class MainPanelWindow(QMainWindow):
                     if actuator_data.get('turn'):
                         actuator_data['turn'] = False
 
-        answer = self.gcode.turn_off_all_autos()
-        # if self.text_status:
-        #     self.text_status.setPlainText(answer.decode())
+        self.gcode.turn_off_all_autos()
 
     def build_btn_set_value(self, layout, actuator_code: int, text, y):
         default_value = self.gcode.actuators[actuator_code].DEFAULT_VALUE
@@ -438,11 +462,15 @@ class MainPanelWindow(QMainWindow):
         return groupbox
 
     def build_autos_layout(self, gcode_auto, actuator_code, actuator_name):
+        is_turned = False
+        if self.open_type == 'open':
+            is_turned = self.buff_json.get(str(gcode_auto.CODE), {}).get(str(actuator_code), {}).get('turn', False)
+
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_open_auto_clicked(s, gcode_auto, actuator_code, actuator_name))
 
         checkbox = QCheckBox()
-        checkbox.setChecked(self.buff_json.get(str(gcode_auto.CODE), {}).get(str(actuator_code), {}).get('turn', False))
+        checkbox.setChecked(is_turned)
         checkbox.clicked.connect(lambda s: self.btn_toggle_auto_clicked(s, gcode_auto, actuator_code))
         self.turn_checkboxes[f'{gcode_auto.CODE}-{actuator_code}'] = checkbox
 
@@ -502,6 +530,38 @@ class MainPanelWindow(QMainWindow):
     def callback_write(self, gcode_line):
         parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
 
+    def extern_print_answer(self, answer: bytes):
+        self.answer = answer
+
+    def extern_callback_write(self, gcode_line):
+        self.gcode_line = gcode_line
+
+    def result_update_from_serial(self, data):
+        self.print_answer(f'{self.gcode_line}{self.answer.decode()}'.encode())
+        if self.workers:
+            self.threadpool.start(self.workers.pop(0))
+
+        auto_code, actuator_code, is_turned = data
+        if is_turned:
+            self.buff_json.setdefault(auto_code, {}).setdefault(actuator_code, {})['turn'] = True
+            self.turn_checkboxes[f'{auto_code}-{actuator_code}'].setChecked(True)
+
+    def get_updates_from_serial(self, key):
+        auto_code, actuator_code = key.split('-')
+        return auto_code, actuator_code, self.gcode.autos[int(auto_code)].is_turn(actuator_code)
+
+    def worker_update_from_serial(self):
+        self.workers = []
+        if self.open_type != 'connect':
+            return
+
+        for key, checkbox in self.turn_checkboxes.items():
+            worker = Worker(self.get_updates_from_serial, key)
+            worker.signals.result.connect(self.result_update_from_serial)
+            self.workers.append(worker)
+
+        self.threadpool.start(self.workers.pop(0))
+
     def __init__(
             self,
             open_type: str,
@@ -516,6 +576,9 @@ class MainPanelWindow(QMainWindow):
         self.auto_windows = {}
         self.turn_checkboxes = {}
         self.buff_json = {}
+
+        self.setWindowTitle('CNC Growbox')
+        self.threadpool = QThreadPool()
 
         self.open_type = open_type
         self.file_path = file_path
@@ -541,9 +604,8 @@ class MainPanelWindow(QMainWindow):
                 timeout=data['timeout_read'],
                 write_timeout=data['timeout_write'],
             )
-            self.gcode = GrowboxGCodeBuilder(self.serial, callback_answer=self.print_answer)
+            self.gcode = GrowboxGCodeBuilder(self.serial, callback_answer=self.extern_print_answer, callback_write=self.extern_callback_write)
 
-        self.setWindowTitle('CNC Growbox')
         layout = QVBoxLayout()
         self.start_menubar()
 
@@ -556,6 +618,11 @@ class MainPanelWindow(QMainWindow):
         groupbox_autos = self.build_groupbox_autos()
         layout.addWidget(groupbox_autos)
 
+        widget = QWidget()
+        widget.setLayout(layout)
+
+        self.setCentralWidget(widget)
+
         if open_type == 'connect':
             # layout.addWidget(QLabel('Секунд с момента включения:'))
             # layout.addWidget(QPushButton('Обновить показания'))
@@ -564,10 +631,7 @@ class MainPanelWindow(QMainWindow):
             layout.addWidget(self.text_status)
             self.print_answer(self.serial.read(100))
 
-        widget = QWidget()
-        widget.setLayout(layout)
-
-        self.setCentralWidget(widget)
+        self.worker_update_from_serial()
 
 
 class SelectSerialPortDialog(QDialog):
@@ -681,9 +745,9 @@ class MainWindow(QMainWindow):
         button.clicked.connect(self.btn_connect_serial_clicked)
         layout.addWidget(button)
 
-        button = QPushButton('Подключиться по HTTP')
+        # button = QPushButton('Подключиться по HTTP')
         # button.clicked.connect(self.btn_connect_http_clicked)
-        layout.addWidget(button)
+        # layout.addWidget(button)
 
         widget = QWidget()
         widget.setLayout(layout)
