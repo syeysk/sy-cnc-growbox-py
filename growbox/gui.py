@@ -8,11 +8,84 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
     QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QTextEdit,
-    QProgressBar, QStatusBar
 )
 from serial.tools.list_ports import comports
 
-from gcode_builder import GrowboxGCodeBuilder
+from gcode_builder import GrowboxGCodeBuilder, AutoCycleHard, AutoCycleSoft, AutoClimateControl
+from gcode_parser import parse_gcode_line
+
+
+def parse_and_bufferize_gcode_line(buff_json, gcode_line):
+    gcode = parse_gcode_line(gcode_line)
+    # from gcode_builder import commands
+    # descr = commands.get(gcode.command)
+    # if descr:
+    #     function, kwargs_descr = descr
+    #     buf_temp = buff_json.setdefault(function, {})
+    #     for name_gcode, name_python in list(kwargs_descr.items())[:1]:
+    #         buf_temp = buf_temp.setdefault(str(gcode.params[name_gcode]), {})
+    #
+    #     if kwargs_descr:
+    #         name_gcode, name_python = list(kwargs_descr.items())[-1]
+    #         buf_temp[name_python] = gcode.params[name_gcode]
+
+    if gcode.command == 'E0':
+        buff_json.setdefault('actuators', {}).setdefault(str(gcode['A']), {})['value'] = gcode['V']
+    elif gcode.command == 'E100':
+        buff_json.setdefault(str(AutoCycleHard.CODE), {}).setdefault(str(gcode['A']), {})['turn'] = gcode['B']
+    elif gcode.command == 'E101':
+        buff_json.setdefault(str(AutoCycleHard.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['B']), {})['duration'] = str(gcode['D'])
+    elif gcode.command == 'E103':
+        buff_json.setdefault(str(AutoCycleHard.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['B']), {})['value'] = str(gcode['V'])
+    elif gcode.command == 'E150':
+        buff_json.setdefault(str(AutoCycleSoft.CODE), {}).setdefault(str(gcode['A']), {})['turn'] = gcode.params['B']
+    elif gcode.command == 'E151':
+        buff_json.setdefault(str(AutoCycleSoft.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['P']), {})['duration'] = str(gcode['D'])
+    elif gcode.command == 'E153':
+        buff_json.setdefault(str(AutoCycleSoft.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['P']), {})['value'] = str(gcode['V'])
+    elif gcode.command == 'E200':
+        buff_json.setdefault(str(AutoClimateControl.CODE), {}).setdefault(str(gcode['A']), {})['turn'] = gcode['B']
+    elif gcode.command == 'E201':
+        buff_json.setdefault(str(AutoClimateControl.CODE), {}).setdefault(str(gcode['A']), {})['sensor'] = gcode['S']
+    elif gcode.command == 'E202':
+        buff_json.setdefault(str(AutoClimateControl.CODE), {}).setdefault(str(gcode['A']), {})['min'] = str(gcode['V'])
+    elif gcode.command == 'E203':
+        buff_json.setdefault(str(AutoClimateControl.CODE), {}).setdefault(str(gcode['A']), {})['max'] = str(gcode['V'])
+
+
+def buff2gcode(buff_json, gcode):
+    # stop all autos
+    if buff_json.get('turn_off_all_autos', True):
+        gcode.turn_off_all_autos()
+
+    # set values on actuators
+    actuators_json = buff_json.setdefault('actuators', {})
+    for actuator in gcode.actuators.values():
+        actuator.set(actuators_json.setdefault(str(actuator.code), {}).get('value', actuator.DEFAULT_VALUE))
+
+    # set autos
+    for actuator in gcode.actuators.values():
+        for auto in gcode.autos.values():
+            actuator_json = buff_json.get(str(auto.CODE), {}).get(str(actuator), {})
+            if auto.CODE in (0, 1):
+                for period in auto.PERIODS:
+                    period_json = actuator_json.get(str(period), {})
+                    auto.set_value(actuator, period, period_json.get('value', auto.DEFAULT_VALUE))
+                    auto.set_duration(actuator, period, period_json.get('duration', auto.DEFAULT_VALUE))
+            elif auto.CODE == 2:
+                auto.set_min(actuator, actuator_json.get('min', auto.DEFAULT_MIN))
+                auto.set_max(actuator, actuator_json.get('max', auto.DEFAULT_MAX))
+                sensor = actuator_json.get('sensor')
+                if sensor is not None:
+                    auto.set_sensor(actuator, sensor)
+
+    # start autos if needs
+    for actuator in gcode.actuators.values():
+        for auto in gcode.autos.values():
+            actuator_json = buff_json.get(str(auto.CODE), {}).get(str(actuator), {})
+            value = actuator_json.get('turn')
+            if value:
+                auto.turn(actuator, value)
 
 
 class SetValueDialog(QDialog):
@@ -44,7 +117,7 @@ class BaseAutoWindow(QWidget):
         super().closeEvent(*args, **kwargs)
         self.is_closed = True
 
-    def __init__(self, gcode_auto, actuator_code, actuator_name, gcode: GrowboxGCodeBuilder, checkboxes, parent=None):
+    def __init__(self, gcode_auto, actuator_code, actuator_name, gcode: GrowboxGCodeBuilder, buff_json: dict, checkboxes, parent=None):
         super().__init__(parent)
         self.code = gcode_auto.CODE
         self.actuator_code = actuator_code
@@ -57,11 +130,11 @@ class BaseAutoWindow(QWidget):
         self.checkbox_turn = QCheckBox('Включена')
         self.checkbox_turn.clicked.connect(self.btn_toggle_auto_clicked)
 
-        self.actuator_json = self.gcode_auto.buff_json.get(str(self.actuator_code), {})
+        self.actuator_json = buff_json.get(str(gcode_auto.CODE), {}).get(str(self.actuator_code), {})
         self.checkbox_turn.setChecked(self.actuator_json.get('turn', False))
 
     def btn_toggle_auto_clicked(self, checked):
-        self.gcode_auto.turn(self.actuator_code, checked)
+        self.gcode_auto.turn(actuator=self.actuator_code, status=checked)
         self.turn_checkboxes[f'{self.code}-{self.actuator_code}'].setChecked(checked)
 
 
@@ -254,8 +327,7 @@ class MainPanelWindow(QMainWindow):
         #         return
         if file_path:
             with open(file_path, 'w') as output_file:
-                temp_gcode = GrowboxGCodeBuilder(output_file, buff_json=self.gcode.buff_json)
-                temp_gcode.buff2gcode()
+                buff2gcode(self.buff_json, GrowboxGCodeBuilder(output_file))
 
             if not self.file_path:
                 self.file_path = Path(file_path)
@@ -266,7 +338,7 @@ class MainPanelWindow(QMainWindow):
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение JSON', default_file_name, '*.json')
         if file_path:
             with open(file_path, 'w') as output_file:
-                json.dump(self.gcode.buff_json, output_file)
+                json.dump(self.buff_json, output_file)
 
             if not self.file_path:
                 self.file_path = Path(file_path)
@@ -279,14 +351,14 @@ class MainPanelWindow(QMainWindow):
         if self.open_type in ('open', 'create'):
             button_action_save = QAction('Сохранить как G-код', self)
             button_action_save.triggered.connect(self.btn_save_gcode)
-            button_action_save_json = QAction('Сохранить как JSON', self)
-            button_action_save_json.triggered.connect(self.btn_save_json)
+            # button_action_save_json = QAction('Сохранить как JSON', self)
+            # button_action_save_json.triggered.connect(self.btn_save_json)
             menu_file.addAction(button_action_save)
-            menu_file.addAction(button_action_save_json)
+            # menu_file.addAction(button_action_save_json)
         if self.open_type == 'connect':
-            button_action_send_json = QAction('Открыть JSON и послать в гроубокс', self)
+            # button_action_send_json = QAction('Открыть JSON и послать в гроубокс', self)
             button_action_send_gcode = QAction('Открыть G-код и послать в гроубокс', self)
-            menu_file.addAction(button_action_send_json)
+            # menu_file.addAction(button_action_send_json)
             menu_file.addAction(button_action_send_gcode)
 
     def build_groupbox_sensors(self):
@@ -321,7 +393,7 @@ class MainPanelWindow(QMainWindow):
         window_key = (gcode_auto.CODE, actuator_code)
         opened_window = self.auto_windows.get(window_key)
         if opened_window is None or opened_window.is_closed:
-            opened_window = window_class(gcode_auto, actuator_code, actuator_name, self.gcode, self.turn_checkboxes)
+            opened_window = window_class(gcode_auto, actuator_code, actuator_name, self.gcode, self.buff_json, self.turn_checkboxes)
             self.auto_windows[window_key] = opened_window
             opened_window.show()
 
@@ -333,7 +405,7 @@ class MainPanelWindow(QMainWindow):
             if checkbox.isChecked():
                 checkbox.setChecked(False)
                 auto_code, actuator_code = key.split('-')
-                auto_data = self.gcode.buff_json.get(auto_code)
+                auto_data = self.buff_json.get(auto_code)
                 if auto_data:
                     actuator_data = auto_data.get(actuator_code)
                     if actuator_data.get('turn'):
@@ -345,7 +417,7 @@ class MainPanelWindow(QMainWindow):
 
     def build_btn_set_value(self, layout, actuator_code: int, text, y):
         default_value = self.gcode.actuators[actuator_code].DEFAULT_VALUE
-        value = self.gcode.buff_json.get('actuators', {}).get(str(actuator_code), {}).get('value', default_value)
+        value = self.buff_json.get('actuators', {}).get(str(actuator_code), {}).get('value', default_value)
         label_value = QLabel(str(value))
 
         button = QPushButton('✎')
@@ -370,7 +442,7 @@ class MainPanelWindow(QMainWindow):
         button.clicked.connect(lambda s: self.btn_open_auto_clicked(s, gcode_auto, actuator_code, actuator_name))
 
         checkbox = QCheckBox()
-        checkbox.setChecked(gcode_auto.buff_json.get(str(actuator_code), {}).get('turn', False))
+        checkbox.setChecked(self.buff_json.get(str(gcode_auto.CODE), {}).get(str(actuator_code), {}).get('turn', False))
         checkbox.clicked.connect(lambda s: self.btn_toggle_auto_clicked(s, gcode_auto, actuator_code))
         self.turn_checkboxes[f'{gcode_auto.CODE}-{actuator_code}'] = checkbox
 
@@ -427,6 +499,9 @@ class MainPanelWindow(QMainWindow):
 
             self.progress_bar.setText(cutted_message)
 
+    def callback_write(self, gcode_line):
+        parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
+
     def __init__(
             self,
             open_type: str,
@@ -440,16 +515,24 @@ class MainPanelWindow(QMainWindow):
         self.progress_bar = None
         self.auto_windows = {}
         self.turn_checkboxes = {}
+        self.buff_json = {}
 
         self.open_type = open_type
         self.file_path = file_path
         if open_type == 'open' and open_subtype == 'json':
             self.print_to_status_bar(str(file_path), 1)
             with file_path.open() as json_file:
-                self.gcode = GrowboxGCodeBuilder(buff_to_json=True, buff_json=json.load(json_file))
+                self.buff_json = json.load(json_file)
+                self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
+        if open_type == 'open' and open_subtype == 'gcode':
+            self.print_to_status_bar(str(file_path), 1)
+            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
+            with file_path.open() as gcode_file:
+                for gcode_line in gcode_file:
+                    parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
         elif open_type == 'create':
             self.print_to_status_bar('Новый файл', 1)
-            self.gcode = GrowboxGCodeBuilder(buff_to_json=True)
+            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
         elif open_type == 'connect' and open_subtype == 'serial':
             self.print_to_status_bar(str(file_path), 1)
             self.serial = serial.Serial(
@@ -458,7 +541,7 @@ class MainPanelWindow(QMainWindow):
                 timeout=data['timeout_read'],
                 write_timeout=data['timeout_write'],
             )
-            self.gcode = GrowboxGCodeBuilder(self.serial, buff_to_json=True, callback_answer=self.print_answer)
+            self.gcode = GrowboxGCodeBuilder(self.serial, callback_answer=self.print_answer)
 
         self.setWindowTitle('CNC Growbox')
         layout = QVBoxLayout()
@@ -533,12 +616,11 @@ class SelectSerialPortDialog(QDialog):
 
 class MainWindow(QMainWindow):
     def btn_open_gcode_clicked(self, checked):
-        pass
-        # file_path, mask = QFileDialog.getOpenFileName(self, 'Открытие G-кода', '~', '*.gcode')
-        # print(file_path, mask)
-        # window = MainPanelWindow()
-        # self.main_panel_windows.append(window)
-        # window.show()
+        file_path, mask = QFileDialog.getOpenFileName(self, 'Открытие G-кода', '~', '*.gcode')
+        if file_path:
+            window = MainPanelWindow('open', 'gcode', file_path=Path(file_path))
+            self.main_panel_windows.append(window)
+            window.show()
 
     def btn_open_json_clicked(self, checked):
         file_path, mask = QFileDialog.getOpenFileName(self, 'Открытие JSON', '~', '*.json')
@@ -588,12 +670,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(button)
 
         button = QPushButton('Открыть G-код')
-        # button.clicked.connect(self.btn_open_gcode_clicked)
+        button.clicked.connect(self.btn_open_gcode_clicked)
         layout.addWidget(button)
 
-        button = QPushButton('Открыть JSON')
-        button.clicked.connect(self.btn_open_json_clicked)
-        layout.addWidget(button)
+        # button = QPushButton('Открыть JSON')
+        # button.clicked.connect(self.btn_open_json_clicked)
+        # layout.addWidget(button)
 
         button = QPushButton('Подключиться по Serial')
         button.clicked.connect(self.btn_connect_serial_clicked)
