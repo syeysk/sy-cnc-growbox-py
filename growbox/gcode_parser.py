@@ -14,6 +14,9 @@ class GCodeLine:
 
 def parse_gcode_line(gcode_line):
     gcode_parts = gcode_line.split()
+    if not gcode_parts:
+        return GCodeLine(command='', cletter='', cvalue=0)
+
     gcode_parts[0] = gcode_parts[0].upper()
     gcode_line = GCodeLine(command=gcode_parts[0], cletter=gcode_parts[0][0], cvalue=int(gcode_parts[0][1:]))
     for part in gcode_parts[1:]:

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import serial
-from PyQt6.QtCore import Qt, QThreadPool
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
@@ -13,7 +13,7 @@ from serial.tools.list_ports import comports
 
 from gcode_builder import GrowboxGCodeBuilder, AutoCycleHard, AutoCycleSoft, AutoClimateControl
 from gcode_parser import parse_gcode_line
-from thread_tools import Worker, SerialWorkersManager
+from thread_tools import SerialWorkersManager
 
 
 def parse_and_bufferize_gcode_line(buff_json, gcode_line):
@@ -308,7 +308,7 @@ class YesNoDialog(QDialog):
         self.setLayout(layout)
 
 
-class MainPanelWindow(QMainWindow, SerialWorkersManager):
+class MainPanelWindow(QMainWindow):
     def closeEvent(self, *args, **kwargs):
         super().closeEvent(*args, **kwargs)
         if self.serial:
@@ -493,11 +493,11 @@ class MainPanelWindow(QMainWindow, SerialWorkersManager):
         return groupbox
 
     def print_to_log(self, data: str, extern=False):
-        if extern:
-            self.answer = data
+        if extern and self.worker_manager.current_worker:
+            self.worker_manager.current_worker.signals.print_to_log.emit(data)
         else:
             if self.widget_log:
-                self.widget_log.setPlainText(data)
+                self.widget_log.insertPlainText(data.decode() if isinstance(data, bytes) else data)
 
     def print_to_status_bar(self, message, status=0):
         if status == 0:
@@ -511,15 +511,14 @@ class MainPanelWindow(QMainWindow, SerialWorkersManager):
             self.progress_bar.setText(cutted_message)
 
     def callback_write(self, gcode_line, extern=False):
-        if extern:
-            self.gcode_line = gcode_line
+        if extern and self.worker_manager.current_worker:
+            self.worker_manager.current_worker.signals.callback_write.emit(gcode_line)
         else:
             self.print_to_log(gcode_line)
             parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
 
     def worker_update_from_serial(self):
         def result_autos(data):
-            self.print_to_log(f'{self.gcode_line}{self.answer.decode()}')
             auto_code, actuator_code, is_turned = data
             self.buff_json.setdefault(auto_code, {}).setdefault(actuator_code, {})['turn'] = is_turned
             self.turn_checkboxes[f'{auto_code}-{actuator_code}'].setChecked(is_turned)
@@ -529,7 +528,6 @@ class MainPanelWindow(QMainWindow, SerialWorkersManager):
             return auto_code, actuator_code, self.gcode.autos[int(auto_code)].is_turn(actuator_code)
 
         def result_sensors(data):
-            self.print_to_log(f'{self.gcode_line}{self.answer.decode()}')
             sensor_code, value = data
             if value is None:
                 self.sensor_widgets[int(sensor_code)].setText('-')
@@ -540,10 +538,10 @@ class MainPanelWindow(QMainWindow, SerialWorkersManager):
             return sensor_code, self.gcode.sensors[int(sensor_code)].get()
 
         for sensor_code, sensor in self.gcode.sensors.items():
-            self.add_and_start_worker(result_sensors, get_sensors, sensor.code)
+            self.worker_manager.add_and_start_worker(result_sensors, get_sensors, sensor.code)
 
         for key, checkbox in self.turn_checkboxes.items():
-            self.add_and_start_worker(result_autos, get_autos, key)
+            self.worker_manager.add_and_start_worker(result_autos, get_autos, key)
 
     def __init__(
             self,
@@ -559,6 +557,10 @@ class MainPanelWindow(QMainWindow, SerialWorkersManager):
         self.turn_checkboxes = {}
         self.buff_json = {}
         self.sensor_widgets = {}
+        self.worker_manager = SerialWorkersManager(
+            print_to_log=self.print_to_log,
+            callback_write=self.callback_write,
+        )
 
         self.setWindowTitle('CNC Growbox')
 
@@ -618,7 +620,7 @@ class MainPanelWindow(QMainWindow, SerialWorkersManager):
             button_update = QPushButton('Обновить показания')
             button_update.clicked.connect(lambda s: self.worker_update_from_serial())
             layout.addWidget(button_update)
-            self.print_to_log(self.serial.read(100).decode())
+            self.worker_manager.add_and_start_worker(None, self.gcode.output.write, '')
             self.worker_update_from_serial()
 
 
