@@ -622,8 +622,8 @@ class MainPanelWindow(QMainWindow):
         for sensor_code, sensor in self.gcode.sensors.items():
             self.worker_manager.add_and_start_worker(result_sensors, get_sensors, sensor.code)
 
-        # for key, checkbox in self.turn_checkboxes.items():
-        #     self.worker_manager.add_and_start_worker(result_autos, get_autos, key)
+        for key, checkbox in self.turn_checkboxes.items():
+            self.worker_manager.add_and_start_worker(result_autos, get_autos, key)
 
     def __init__(
             self,
