@@ -199,7 +199,7 @@ class AutoCycleHardWindow(BaseAutoWindow):
         self.setLayout(layout)
         self.labels_by_period = {}
 
-        for period_code, period_text in enumerate(('Включённое состояние', 'Выключенное состояние')):
+        for period_code, period_text in enumerate(('Выключенное состояние', 'Включённое состояние')):
             layout_grid = QGridLayout()
             groupbox = QGroupBox(period_text)
 
@@ -241,13 +241,14 @@ class AutoCycleSoftWindow(BaseAutoWindow):
         def result_update(data):
             period_code, duration, value = data
             self.labels_by_period.setdefault(period_code, {})['duration'].setText(str(duration))
-            self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
+            if period_code % 2 != 0:
+                self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
 
         def task_update(period_code):
             return (
                 period_code,
                 self.gcode_auto.get_duration(self.actuator_code, period_code),
-                self.gcode_auto.get_value(self.actuator_code, period_code),
+                self.gcode_auto.get_value(self.actuator_code, period_code) if period_code % 2 != 0 else None,
             )
 
         for period_code in self.gcode_auto.PERIODS:
