@@ -106,8 +106,18 @@ class AutoCycleHard:
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E101 A{actuator} B{period} D{duration}')
 
+    def get_duration(self, actuator: Actuator | int | str, period: int):
+        answer = self.output.write(f'E1011 A{actuator} B{period}')
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:]))
+
     def set_value(self, actuator: Actuator | int | str, period: int, value: int):
         return self.output.write(f'E103 A{actuator} B{period} V{value}')
+
+    def get_value(self, actuator: Actuator | int | str, period: int):
+        answer = self.output.write(f'E1031 A{actuator} B{period}')
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:]))
 
 
 class AutoCycleSoft:
@@ -137,8 +147,18 @@ class AutoCycleSoft:
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E151 A{actuator} P{period} D{duration}')
 
+    def get_duration(self, actuator: Actuator | int | str, period: int):
+        answer = self.output.write(f'E1511 A{actuator} P{period}')
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:]))
+
     def set_value(self, actuator: Actuator | int | str, period: int, value: int):
         return self.output.write(f'E153 A{actuator} P{period} V{value}')
+
+    def get_value(self, actuator: Actuator | int | str, period: int):
+        answer = self.output.write(f'E1531 A{actuator} P{period}')
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:]))
 
 
 class AutoClimateControl:
@@ -162,11 +182,26 @@ class AutoClimateControl:
     def set_min(self, actuator: Actuator | int | str, value: int):
         return self.output.write(f'E202 A{actuator} V{value}')
 
+    def get_min(self, actuator: Actuator | int | str):
+        answer = self.output.write(f'E2021 A{actuator}')
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:]))
+
     def set_max(self, actuator: Actuator | int | str, value: int):
         return self.output.write(f'E203 A{actuator} V{value}')
 
+    def get_max(self, actuator: Actuator | int | str):
+        answer = self.output.write(f'E2031 A{actuator}')
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:]))
+
     def set_sensor(self, actuator: Actuator | int | str, sensor: Sensor | int | str):
         return self.output.write(f'E201 A{actuator} S{sensor}')
+
+    def get_sensor(self, actuator: Actuator | int | str):
+        answer = self.output.write(f'E2011 A{actuator}')
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:]))
 
 
 class GrowboxGCodeBuilder:

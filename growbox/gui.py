@@ -118,7 +118,18 @@ class BaseAutoWindow(QWidget):
         super().closeEvent(*args, **kwargs)
         self.is_closed = True
 
-    def __init__(self, gcode_auto, actuator_code, actuator_name, gcode: GrowboxGCodeBuilder, buff_json: dict, checkboxes, parent=None):
+    def __init__(
+            self,
+            gcode_auto,
+            actuator_code,
+            actuator_name,
+            gcode: GrowboxGCodeBuilder,
+            buff_json: dict,
+            checkboxes,
+            open_type,
+            worker_manager,
+            parent=None,
+    ):
         super().__init__(parent)
         self.code = gcode_auto.CODE
         self.actuator_code = actuator_code
@@ -126,6 +137,8 @@ class BaseAutoWindow(QWidget):
         self.gcode = gcode
         self.turn_checkboxes = checkboxes
         self.gcode_auto = gcode_auto
+        self.open_type = open_type
+        self.worker_manager = worker_manager
         self.setWindowTitle(f'Настройка автоматики')
 
         self.checkbox_turn = QCheckBox('Включена')
@@ -155,11 +168,28 @@ class AutoCycleHardWindow(BaseAutoWindow):
 
         button = QPushButton('✎')
         what_set = 'value' if y else 'duration'
+        self.labels_by_period.setdefault(period_code, {})[what_set] = label_value
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, label_value, what_set))
 
         layout.addWidget(QLabel(text), y, 0)
         layout.addWidget(label_value, y, 1)
         layout.addWidget(button, y, 2)
+
+    def update(self):
+        def result_update(data):
+            period_code, duration, value = data
+            self.labels_by_period.setdefault(period_code, {})['duration'].setText(str(duration))
+            self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
+
+        def task_update(period_code):
+            return (
+                period_code,
+                self.gcode_auto.get_duration(self.actuator_code, period_code),
+                self.gcode_auto.get_value(self.actuator_code, period_code),
+            )
+
+        for period_code in self.gcode_auto.PERIODS:
+            self.worker_manager.add_and_start_worker(result_update, task_update, period_code)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -167,6 +197,7 @@ class AutoCycleHardWindow(BaseAutoWindow):
         layout.addWidget(QLabel(f'Автоматика с резкой сменой периода для устройства "{self.actuator_name}"'))
         layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
+        self.labels_by_period = {}
 
         for period_code, period_text in enumerate(('Включённое состояние', 'Выключенное состояние')):
             layout_grid = QGridLayout()
@@ -178,6 +209,9 @@ class AutoCycleHardWindow(BaseAutoWindow):
 
             groupbox.setLayout(layout_grid)
             layout.addWidget(groupbox)
+
+        if self.open_type == 'connect':
+            self.update()
 
 
 class AutoCycleSoftWindow(BaseAutoWindow):
@@ -196,11 +230,28 @@ class AutoCycleSoftWindow(BaseAutoWindow):
 
         button = QPushButton('✎')
         what_set = 'value' if y else 'duration'
+        self.labels_by_period.setdefault(period_code, {})[what_set] = label_value
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, label_value, what_set))
 
         layout.addWidget(QLabel(text), y, 0)
         layout.addWidget(label_value, y, 1)
         layout.addWidget(button, y, 2)
+
+    def update(self):
+        def result_update(data):
+            period_code, duration, value = data
+            self.labels_by_period.setdefault(period_code, {})['duration'].setText(str(duration))
+            self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
+
+        def task_update(period_code):
+            return (
+                period_code,
+                self.gcode_auto.get_duration(self.actuator_code, period_code),
+                self.gcode_auto.get_value(self.actuator_code, period_code),
+            )
+
+        for period_code in self.gcode_auto.PERIODS:
+            self.worker_manager.add_and_start_worker(result_update, task_update, period_code)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -208,6 +259,7 @@ class AutoCycleSoftWindow(BaseAutoWindow):
         layout.addWidget(QLabel(f'Автоматика с плавной сменой периода для устройства "{self.actuator_name}"'))
         layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
+        self.labels_by_period = {}
 
         for period_code, period_text in enumerate(('Рассвет', 'День', 'Закат', 'Ночь')):
             layout_grid = QGridLayout()
@@ -220,6 +272,9 @@ class AutoCycleSoftWindow(BaseAutoWindow):
 
             groupbox.setLayout(layout_grid)
             layout.addWidget(groupbox)
+
+        if self.open_type == 'connect':
+            self.update()
 
 
 class AutoClimateControlWindow(BaseAutoWindow):
@@ -238,31 +293,33 @@ class AutoClimateControlWindow(BaseAutoWindow):
         layout.addLayout(layout_grid)
 
         text = 'Мин. допустимое значение:'
-        label_value_min = QLabel(self.actuator_json.get('min', '0'))
+        self.label_value_min = QLabel(self.actuator_json.get('min', '0'))
         button = QPushButton('✎')
-        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, label_value_min, 'min'))
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, self.label_value_min, 'min'))
         layout_grid.addWidget(QLabel(text), 0, 0)
-        layout_grid.addWidget(label_value_min, 0, 1)
+        layout_grid.addWidget(self.label_value_min, 0, 1)
         layout_grid.addWidget(button, 0, 2)
 
         text = 'Макс. допустимое значение:'
-        label_value_max = QLabel(self.actuator_json.get('max', '0'))
+        self.label_value_max = QLabel(self.actuator_json.get('max', '0'))
         button = QPushButton('✎')
-        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, label_value_max, 'max'))
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, self.label_value_max, 'max'))
         layout_grid.addWidget(QLabel(text), 1, 0)
-        layout_grid.addWidget(label_value_max, 1, 1)
+        layout_grid.addWidget(self.label_value_max, 1, 1)
         layout_grid.addWidget(button, 1, 2)
 
         text = 'Датчик:'
         sensor_code = int(self.actuator_json.get('sensor', -1))
-        label_value_sensor = QLabel('Не выбран') if sensor_code == -1 else QLabel(self.sensors[sensor_code])
+        self.label_value_sensor = QLabel('Не выбран') if sensor_code == -1 else QLabel(self.sensors[sensor_code])
         button = QPushButton('✎')
-        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, label_value_sensor, 'sensor'))
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, self.label_value_sensor, 'sensor'))
         layout_grid.addWidget(QLabel(text), 2, 0)
-        layout_grid.addWidget(label_value_sensor, 2, 1)
+        layout_grid.addWidget(self.label_value_sensor, 2, 1)
         layout_grid.addWidget(button, 2, 2)
 
         self.setLayout(layout)
+        if self.open_type == 'connect':
+            self.update()
 
     def btn_set_value_clicked(self, checked, text, label_value, what_set):
         initial_value = label_value.text()
@@ -289,6 +346,22 @@ class AutoClimateControlWindow(BaseAutoWindow):
                 value = dlg.input.currentItem()
                 label_value.setText(value.text())
                 self.gcode_auto.set_sensor(self.actuator_code, value.data(Qt.ItemDataRole.UserRole))
+
+    def update(self):
+        def result_update(data):
+            vmin, vmax, sensor = data
+            self.label_value_min.setText(str(vmin))
+            self.label_value_max.setText(str(vmax))
+            self.label_value_sensor.setText(self.sensors[sensor])
+
+        def task_update():
+            return (
+                self.gcode_auto.get_min(self.actuator_code),
+                self.gcode_auto.get_max(self.actuator_code),
+                self.gcode_auto.get_sensor(self.actuator_code),
+            )
+
+        self.worker_manager.add_and_start_worker(result_update, task_update)
 
 
 class YesNoDialog(QDialog):
@@ -399,7 +472,16 @@ class MainPanelWindow(QMainWindow):
         window_key = (gcode_auto.CODE, actuator_code)
         opened_window = self.auto_windows.get(window_key)
         if opened_window is None or opened_window.is_closed:
-            opened_window = window_class(gcode_auto, actuator_code, actuator_name, self.gcode, self.buff_json, self.turn_checkboxes)
+            opened_window = window_class(
+                gcode_auto,
+                actuator_code,
+                actuator_name,
+                self.gcode,
+                self.buff_json,
+                self.turn_checkboxes,
+                self.open_type,
+                self.worker_manager,
+            )
             self.auto_windows[window_key] = opened_window
             opened_window.show()
 
@@ -540,8 +622,8 @@ class MainPanelWindow(QMainWindow):
         for sensor_code, sensor in self.gcode.sensors.items():
             self.worker_manager.add_and_start_worker(result_sensors, get_sensors, sensor.code)
 
-        for key, checkbox in self.turn_checkboxes.items():
-            self.worker_manager.add_and_start_worker(result_autos, get_autos, key)
+        # for key, checkbox in self.turn_checkboxes.items():
+        #     self.worker_manager.add_and_start_worker(result_autos, get_autos, key)
 
     def __init__(
             self,
