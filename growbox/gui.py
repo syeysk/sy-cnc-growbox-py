@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import serial
-from PyQt6.QtCore import Qt, QRunnable, pyqtSlot, QThreadPool, QObject, pyqtSignal
+from PyQt6.QtCore import Qt, QThreadPool
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
@@ -13,6 +13,7 @@ from serial.tools.list_ports import comports
 
 from gcode_builder import GrowboxGCodeBuilder, AutoCycleHard, AutoCycleSoft, AutoClimateControl
 from gcode_parser import parse_gcode_line
+from thread_tools import Worker, SerialWorkersManager
 
 
 def parse_and_bufferize_gcode_line(buff_json, gcode_line):
@@ -307,35 +308,7 @@ class YesNoDialog(QDialog):
         self.setLayout(layout)
 
 
-class WorkerSignals(QObject):
-    finished = pyqtSignal()
-    error = pyqtSignal(tuple)
-    result = pyqtSignal(object)
-
-
-class Worker(QRunnable):
-    def __init__(self, fn, *args, **kwargs):
-        super(Worker, self).__init__()
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-        self.signals = WorkerSignals()
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-        except Exception:
-            # traceback.print_exc()
-            exctype, value = sys.exc_info()[:2]
-            self.signals.error.emit((exctype, value))#, traceback.format_exc()))
-        else:
-            self.signals.result.emit(result)  # Return the result of the processing
-        finally:
-            self.signals.finished.emit()  # Done
-
-
-class MainPanelWindow(QMainWindow):
+class MainPanelWindow(QMainWindow, SerialWorkersManager):
     def closeEvent(self, *args, **kwargs):
         super().closeEvent(*args, **kwargs)
         if self.serial:
@@ -393,13 +366,20 @@ class MainPanelWindow(QMainWindow):
         layout = QGridLayout()
 
         layout.addWidget(QLabel('Влажность:'), 0, 0)
-        layout.addWidget(QLabel('-'), 0, 1)
+        label_humid = QLabel('-')
+        self.sensor_widgets[1] = label_humid
+        layout.addWidget(label_humid, 0, 1)
+        layout.addWidget(QLabel('%'), 0, 2)
 
         layout.addWidget(QLabel('Температура:'), 1, 0)
-        layout.addWidget(QLabel('-'), 1, 1)
+        label_temperatue = QLabel('-')
+        self.sensor_widgets[0] = label_temperatue
+        layout.addWidget(label_temperatue, 1, 1)
+        layout.addWidget(QLabel('℃'), 1, 2)
 
         groupbox = QGroupBox('Показания датчиков')
         groupbox.setLayout(layout)
+
         return groupbox
 
     def btn_set_value_clicked(self, checked, actuator_code, text, label_value):
@@ -512,9 +492,12 @@ class MainPanelWindow(QMainWindow):
         groupbox.setLayout(layout)
         return groupbox
 
-    def print_answer(self, answer: bytes):
-        if self.text_status:
-            self.text_status.setPlainText(answer.decode())
+    def print_to_log(self, data: str, extern=False):
+        if extern:
+            self.answer = data
+        else:
+            if self.widget_log:
+                self.widget_log.setPlainText(data)
 
     def print_to_status_bar(self, message, status=0):
         if status == 0:
@@ -527,40 +510,40 @@ class MainPanelWindow(QMainWindow):
 
             self.progress_bar.setText(cutted_message)
 
-    def callback_write(self, gcode_line):
-        parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
-
-    def extern_print_answer(self, answer: bytes):
-        self.answer = answer
-
-    def extern_callback_write(self, gcode_line):
-        self.gcode_line = gcode_line
-
-    def result_update_from_serial(self, data):
-        self.print_answer(f'{self.gcode_line}{self.answer.decode()}'.encode())
-        if self.workers:
-            self.threadpool.start(self.workers.pop(0))
-
-        auto_code, actuator_code, is_turned = data
-        if is_turned:
-            self.buff_json.setdefault(auto_code, {}).setdefault(actuator_code, {})['turn'] = True
-            self.turn_checkboxes[f'{auto_code}-{actuator_code}'].setChecked(True)
-
-    def get_updates_from_serial(self, key):
-        auto_code, actuator_code = key.split('-')
-        return auto_code, actuator_code, self.gcode.autos[int(auto_code)].is_turn(actuator_code)
+    def callback_write(self, gcode_line, extern=False):
+        if extern:
+            self.gcode_line = gcode_line
+        else:
+            self.print_to_log(gcode_line)
+            parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
 
     def worker_update_from_serial(self):
-        self.workers = []
-        if self.open_type != 'connect':
-            return
+        def result_autos(data):
+            self.print_to_log(f'{self.gcode_line}{self.answer.decode()}')
+            auto_code, actuator_code, is_turned = data
+            self.buff_json.setdefault(auto_code, {}).setdefault(actuator_code, {})['turn'] = is_turned
+            self.turn_checkboxes[f'{auto_code}-{actuator_code}'].setChecked(is_turned)
+
+        def get_autos(key):
+            auto_code, actuator_code = key.split('-')
+            return auto_code, actuator_code, self.gcode.autos[int(auto_code)].is_turn(actuator_code)
+
+        def result_sensors(data):
+            self.print_to_log(f'{self.gcode_line}{self.answer.decode()}')
+            sensor_code, value = data
+            if value is None:
+                self.sensor_widgets[int(sensor_code)].setText('-')
+            else:
+                self.sensor_widgets[int(sensor_code)].setText(str(value))
+
+        def get_sensors(sensor_code):
+            return sensor_code, self.gcode.sensors[int(sensor_code)].get()
+
+        for sensor_code, sensor in self.gcode.sensors.items():
+            self.add_and_start_worker(result_sensors, get_sensors, sensor.code)
 
         for key, checkbox in self.turn_checkboxes.items():
-            worker = Worker(self.get_updates_from_serial, key)
-            worker.signals.result.connect(self.result_update_from_serial)
-            self.workers.append(worker)
-
-        self.threadpool.start(self.workers.pop(0))
+            self.add_and_start_worker(result_autos, get_autos, key)
 
     def __init__(
             self,
@@ -571,14 +554,13 @@ class MainPanelWindow(QMainWindow):
     ):
         super().__init__()
         self.serial = None
-        self.text_status = None
         self.progress_bar = None
         self.auto_windows = {}
         self.turn_checkboxes = {}
         self.buff_json = {}
+        self.sensor_widgets = {}
 
         self.setWindowTitle('CNC Growbox')
-        self.threadpool = QThreadPool()
 
         self.open_type = open_type
         self.file_path = file_path
@@ -604,7 +586,11 @@ class MainPanelWindow(QMainWindow):
                 timeout=data['timeout_read'],
                 write_timeout=data['timeout_write'],
             )
-            self.gcode = GrowboxGCodeBuilder(self.serial, callback_answer=self.extern_print_answer, callback_write=self.extern_callback_write)
+            self.gcode = GrowboxGCodeBuilder(
+                self.serial,
+                callback_answer=lambda s: self.print_to_log(s, True),
+                callback_write=lambda s: self.callback_write(s, True),
+            )
 
         layout = QVBoxLayout()
         self.start_menubar()
@@ -623,15 +609,17 @@ class MainPanelWindow(QMainWindow):
 
         self.setCentralWidget(widget)
 
+        self.widget_log = QTextEdit()
+        self.widget_log.setReadOnly(True)
+        layout.addWidget(self.widget_log)
+
         if open_type == 'connect':
             # layout.addWidget(QLabel('Секунд с момента включения:'))
-            # layout.addWidget(QPushButton('Обновить показания'))
-            self.text_status = QTextEdit()
-            self.text_status.setReadOnly(True)
-            layout.addWidget(self.text_status)
-            self.print_answer(self.serial.read(100))
-
-        self.worker_update_from_serial()
+            button_update = QPushButton('Обновить показания')
+            button_update.clicked.connect(lambda s: self.worker_update_from_serial())
+            layout.addWidget(button_update)
+            self.print_to_log(self.serial.read(100).decode())
+            self.worker_update_from_serial()
 
 
 class SelectSerialPortDialog(QDialog):

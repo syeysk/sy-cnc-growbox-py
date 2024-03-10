@@ -75,7 +75,10 @@ class Sensor:
         return str(self.code)
 
     def get(self):
-        return self.output.write(f'E2 S{self.code}')
+        answer = self.output.write(f'E2 S{self.code}')
+        answer_lines = answer.decode().split('\r\n')
+        value = answer_lines[0][2:].strip()
+        return None if value == 'NAN' else float(value)
 
 
 class AutoCycleHard:
