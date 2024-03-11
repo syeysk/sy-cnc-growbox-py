@@ -103,6 +103,11 @@ class AutoCycleHard:
         answer_lines = answer.decode().split('\r\n')
         return bool(float(answer_lines[0][2:]))
 
+    def get_current(self, actuator: Actuator | int | str):
+        answer = self.output.write(f'E102 A{actuator}')
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:])), int(float(answer_lines[1][2:]))
+
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E101 A{actuator} B{period} D{duration}')
 
@@ -143,6 +148,11 @@ class AutoCycleSoft:
         answer = self.output.write(f'E1501 A{actuator}')
         answer_lines = answer.decode().split('\r\n')
         return bool(float(answer_lines[0][2:]))
+
+    def get_current(self, actuator: Actuator | int | str):
+        answer = self.output.write(f'E152 A{actuator}')
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:])), int(float(answer_lines[1][2:]))
 
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E151 A{actuator} P{period} D{duration}')

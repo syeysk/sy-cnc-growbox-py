@@ -175,7 +175,7 @@ class AutoCycleHardWindow(BaseAutoWindow):
         layout.addWidget(label_value, y, 1)
         layout.addWidget(button, y, 2)
 
-    def update(self):
+    def update(self, checked=None):
         def result_update(data):
             period_code, duration, value = data
             self.labels_by_period.setdefault(period_code, {})['duration'].setText(str(duration))
@@ -188,6 +188,15 @@ class AutoCycleHardWindow(BaseAutoWindow):
                 self.gcode_auto.get_value(self.actuator_code, period_code),
             )
 
+        def result_current(data):
+            period_code, current_duration = data
+            period_name = 'включённого' if period_code else 'выключенного'
+            self.label_current.setText(self.label_current_mask.format(current_duration, period_name))
+
+        def task_current():
+            return self.gcode_auto.get_current(self.actuator_code)
+
+        self.worker_manager.add_and_start_worker(result_current, task_current)
         for period_code in self.gcode_auto.PERIODS:
             self.worker_manager.add_and_start_worker(result_update, task_update, period_code)
 
@@ -198,6 +207,8 @@ class AutoCycleHardWindow(BaseAutoWindow):
         layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
         self.labels_by_period = {}
+        self.label_current = None
+        self.label_current_mask = 'Прошло {} минуты {} состояния'
 
         for period_code, period_text in enumerate(('Выключенное состояние', 'Включённое состояние')):
             layout_grid = QGridLayout()
@@ -211,6 +222,11 @@ class AutoCycleHardWindow(BaseAutoWindow):
             layout.addWidget(groupbox)
 
         if self.open_type == 'connect':
+            self.label_current = QLabel('')
+            button_update = QPushButton('Обновить')
+            button_update.clicked.connect(self.update)
+            layout.addWidget(self.label_current)
+            layout.addWidget(button_update)
             self.update()
 
 
@@ -237,7 +253,7 @@ class AutoCycleSoftWindow(BaseAutoWindow):
         layout.addWidget(label_value, y, 1)
         layout.addWidget(button, y, 2)
 
-    def update(self):
+    def update(self, checked=None):
         def result_update(data):
             period_code, duration, value = data
             self.labels_by_period.setdefault(period_code, {})['duration'].setText(str(duration))
@@ -251,6 +267,16 @@ class AutoCycleSoftWindow(BaseAutoWindow):
                 self.gcode_auto.get_value(self.actuator_code, period_code) if period_code % 2 != 0 else None,
             )
 
+        def result_current(data):
+            period_names = ['рассвета', 'дня', 'заката', 'ночи']
+            period_code, current_duration = data
+            period_name = period_names[period_code]
+            self.label_current.setText(self.label_current_mask.format(current_duration, period_name))
+
+        def task_current():
+            return self.gcode_auto.get_current(self.actuator_code)
+
+        self.worker_manager.add_and_start_worker(result_current, task_current)
         for period_code in self.gcode_auto.PERIODS:
             self.worker_manager.add_and_start_worker(result_update, task_update, period_code)
 
@@ -261,6 +287,8 @@ class AutoCycleSoftWindow(BaseAutoWindow):
         layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
         self.labels_by_period = {}
+        self.label_current = None
+        self.label_current_mask = 'Прошло {} минуты {}'
 
         for period_code, period_text in enumerate(('Рассвет', 'День', 'Закат', 'Ночь')):
             layout_grid = QGridLayout()
@@ -275,6 +303,11 @@ class AutoCycleSoftWindow(BaseAutoWindow):
             layout.addWidget(groupbox)
 
         if self.open_type == 'connect':
+            self.label_current = QLabel('')
+            button_update = QPushButton('Обновить')
+            button_update.clicked.connect(self.update)
+            layout.addWidget(self.label_current)
+            layout.addWidget(button_update)
             self.update()
 
 
@@ -320,6 +353,9 @@ class AutoClimateControlWindow(BaseAutoWindow):
 
         self.setLayout(layout)
         if self.open_type == 'connect':
+            button_update = QPushButton('Обновить')
+            button_update.clicked.connect(self.update)
+            layout.addWidget(button_update)
             self.update()
 
     def btn_set_value_clicked(self, checked, text, label_value, what_set):
@@ -348,7 +384,7 @@ class AutoClimateControlWindow(BaseAutoWindow):
                 label_value.setText(value.text())
                 self.gcode_auto.set_sensor(self.actuator_code, value.data(Qt.ItemDataRole.UserRole))
 
-    def update(self):
+    def update(self, checked=None):
         def result_update(data):
             vmin, vmax, sensor = data
             self.label_value_min.setText(str(vmin))
