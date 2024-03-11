@@ -255,6 +255,9 @@ class GrowboxGCodeBuilder:
     def turn_off_all_autos(self):
         return self.output.write('E3')
 
+    def write(self, gcode_line: str):
+        return self.output.write(gcode_line)
+
 
 if __name__ == '__main__':
     from serial.tools.list_ports import comports

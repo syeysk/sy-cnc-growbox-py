@@ -418,6 +418,46 @@ class YesNoDialog(QDialog):
         self.setLayout(layout)
 
 
+class GCodeSendWindow(QWidget):
+    def start_sending(self, checked):
+        def result_send(line_index):
+            self.label_progress.setText(self.progress_mask.format(line_index, self.count_lines))
+
+        def task_send(gcode_line, line_index):
+            self.gcode.write(gcode_line)
+            return line_index
+
+        with self.file_path.open() as file_gcode:
+            line_index = 1
+            for gcode_line in file_gcode:
+                self.worker_manager.add_and_start_worker(result_send, task_send, gcode_line, line_index)
+                line_index += 1
+
+    def __init__(self, parent, gcode, file_path, worker_manager):
+        super().__init__()
+        self.setWindowTitle(f'Отправка G-кода в гроубокс')
+        self.gcode = gcode
+        self.file_path = file_path
+        self.worker_manager = worker_manager
+
+        self.progress_mask = 'Отправлено {} строк из {}'
+        self.label_progress = QLabel()
+        button_start = QPushButton('Начать')
+        button_start.clicked.connect(self.start_sending)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.label_progress)
+        layout.addWidget(button_start)
+        self.setLayout(layout)
+
+        with file_path.open() as file_gcode:
+            self.count_lines = 0
+            for _ in file_gcode:
+                self.count_lines += 1
+
+        self.label_progress.setText(self.progress_mask.format(0, self.count_lines))
+
+
 class MainPanelWindow(QMainWindow):
     def closeEvent(self, *args, **kwargs):
         super().closeEvent(*args, **kwargs)
@@ -444,6 +484,13 @@ class MainPanelWindow(QMainWindow):
                 self.file_path = Path(file_path)
                 self.print_to_status_bar(str(file_path), 1)
 
+    def btn_send_gcode(self, checked):
+        file_path, mask = QFileDialog.getOpenFileName(self, 'Открытие G-кода', '~', '*.gcode')
+        if file_path:
+            window = GCodeSendWindow(self, self.gcode, Path(file_path), self.worker_manager)
+            self.gcode_send_window = window
+            window.show()
+
     def btn_save_json(self, checked):
         default_file_name = self.file_path.stem if self.file_path else ''
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение JSON', default_file_name, '*.json')
@@ -469,6 +516,7 @@ class MainPanelWindow(QMainWindow):
         if self.open_type == 'connect':
             # button_action_send_json = QAction('Открыть JSON и послать в гроубокс', self)
             button_action_send_gcode = QAction('Открыть G-код и послать в гроубокс', self)
+            button_action_send_gcode.triggered.connect(self.btn_send_gcode)
             # menu_file.addAction(button_action_send_json)
             menu_file.addAction(button_action_send_gcode)
 
@@ -866,10 +914,8 @@ class MainWindow(QMainWindow):
 
 def run():
     app = QApplication(sys.argv)
-
     window = MainWindow()
     window.show()
-
     app.exec()
 
 
