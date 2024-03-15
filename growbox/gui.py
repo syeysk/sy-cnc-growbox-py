@@ -3,11 +3,13 @@ import sys
 from pathlib import Path
 
 import serial
+import yaml
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
     QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QTextEdit,
+    QRadioButton, QButtonGroup,
 )
 from serial.tools.list_ports import comports
 
@@ -87,6 +89,10 @@ def buff2gcode(buff_json, gcode):
             value = actuator_json.get('turn')
             if value:
                 auto.turn(actuator, value)
+
+
+def generate_gcode(gcode: GrowboxGCodeBuilder, profile_data: dict):
+    gcode.turn_off_all_autos()
 
 
 class SetValueDialog(QDialog):
@@ -729,7 +735,7 @@ class MainPanelWindow(QMainWindow):
             callback_write=self.callback_write,
         )
 
-        self.setWindowTitle('CNC Growbox')
+        self.setWindowTitle('Управляющая программа')
 
         self.open_type = open_type
         self.file_path = file_path
@@ -808,14 +814,14 @@ class SelectSerialPortDialog(QDialog):
             widget_item_port = QListWidgetItem(port, self.input_port)
             widget_item_port.setData(Qt.ItemDataRole.UserRole, port)
             if not index:
-                widget_item_port.setSelected(True)
+                self.input_port.setCurrentItem(widget_item_port)
 
         self.input_baudrate = QListWidget()
         for baudrate in [4800, 9600, 19200, 38400, 76800, 153600]:
             widget_item_baudrate = QListWidgetItem(str(baudrate), self.input_baudrate)
             widget_item_baudrate.setData(Qt.ItemDataRole.UserRole, baudrate)
-            # if baudrate == 9600:
-            #     widget_item_baudrate.setSelected(True)
+            if baudrate == 9600:
+                self.input_baudrate.setCurrentItem(widget_item_baudrate)
 
         self.input_timeout_read = QLineEdit('2.2')
         self.input_timeout_write = QLineEdit('0.1')
@@ -833,6 +839,180 @@ class SelectSerialPortDialog(QDialog):
         layout.addLayout(layout_grid)
         layout.addWidget(button_box)
         self.setLayout(layout)
+
+
+class PlantProfileWindow(QMainWindow):
+    def btn_set_grow_mode_clicked(self, checked, radio_id):
+        print(checked, radio_id)
+
+    def collect_profile_from_gui(self) -> dict | None:
+        species_lat = self.input_species_lat.text()
+        if not species_lat:
+            self.print_to_status_bar('Не указано видовое название растения')
+            return
+
+        current_item_shade_reaction = self.select_shade_reaction.currentItem()
+        if not current_item_shade_reaction:
+            self.print_to_status_bar('Не указана реакция растения на тень')
+            return
+
+        current_item_photoperiodism = self.select_photoperiodism.currentItem()
+        if not current_item_photoperiodism:
+            self.print_to_status_bar('Не указан фотопериодизм')
+            return
+
+        return {
+            'species_lat': species_lat,
+            'shade_reaction': current_item_shade_reaction.data(Qt.ItemDataRole.UserRole),
+            'photoperiodism': current_item_photoperiodism.data(Qt.ItemDataRole.UserRole),
+        }
+
+    def btn_save_profile_clicked(self, checked):
+        profile_data = self.collect_profile_from_gui()
+        if not profile_data:
+            return
+
+        default_file_name = self.file_path.stem if self.file_path else profile_data['species_lat']
+        file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение профиля', default_file_name, '*.yaml')
+        if file_path:
+            with open(file_path, 'w') as output_file:
+                yaml.dump(profile_data, output_file)
+
+            if not self.file_path:
+                self.file_path = Path(file_path)
+                self.print_to_status_bar(str(file_path), 1)
+                self.setWindowTitle('Редактирование профиля растения')
+
+        self.print_to_status_bar('Сохранено')
+
+    def btn_generate_gcode_clicked(self, checked):
+        profile_data = self.collect_profile_from_gui()
+        if not profile_data:
+            return
+
+        default_file_name = self.file_path.stem if self.file_path else profile_data['species_lat']
+        file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение G-код', default_file_name, '*.gcode')
+        if file_path:
+            with open(file_path, 'w') as output_file:
+                generate_gcode(GrowboxGCodeBuilder(output=file_object), profile_data)
+
+            if not self.file_path:
+                self.file_path = Path(file_path)
+
+        self.print_to_status_bar('Сгенерировано и Сохранено')
+
+    def print_to_status_bar(self, message, status=0):
+        if status == 0:
+            self.statusBar().showMessage(message)
+        elif status == 1:
+            cutted_message = message if len(message) < 40 else f'{message[:19]}...{message[-18:]}'
+            self.progress_bar.setText(cutted_message)
+
+    def start_menubar(self):
+        menu = self.menuBar()
+        menu_file = menu.addMenu('Файл')
+
+        button_action_save = QAction('Сохранить профиль', self)
+        button_action_save.triggered.connect(self.btn_save_profile_clicked)
+        menu_file.addAction(button_action_save)
+
+    def __init__(self, file_path: Path | None = None):
+        super().__init__()
+        self.file_path = file_path
+        self.grow_mode = 1
+        self.progress_bar = QLabel()
+        self.statusBar().addPermanentWidget(self.progress_bar)
+
+        if file_path:
+            with file_path.open('r') as profile_file_object:
+                profile_data = yaml.load(profile_file_object, Loader=yaml.Loader)
+
+            self.print_to_status_bar(str(file_path), 1)
+            self.setWindowTitle('Редактирование профиля растения')
+        else:
+            profile_data = {}
+            self.print_to_status_bar('Новый', 1)
+            self.setWindowTitle('Создание профиля растения')
+
+        layout = QVBoxLayout()
+
+        layout.addWidget(QLabel('Видовое название растение (на латыни):'))
+        self.input_species_lat = QLineEdit(profile_data.get('species_lat', ''))
+        layout.addWidget(self.input_species_lat)
+
+        layout.addWidget(
+            QLabel(
+                text='Реакция растения на тень:',
+                toolTip='реакция на дальний красный в тени',
+                toolTipDuration=2000,
+            ),
+        )
+        self.select_shade_reaction = QListWidget()
+        items = (('Теневыносливые (увеличивают листья)', 1), ('Теневые избегатели (вытягивают стебель)', 2))
+        for item_name, item_id in items:
+            item_widget = QListWidgetItem(item_name)
+            item_widget.setData(Qt.ItemDataRole.UserRole, item_id)
+            self.select_shade_reaction.addItem(item_widget)
+            if profile_data.get('shade_reaction') == item_id:
+                self.select_shade_reaction.setCurrentItem(item_widget)
+
+        self.select_shade_reaction.setMaximumHeight(25*3)
+        layout.addWidget(self.select_shade_reaction)
+
+        layout.addWidget(
+            QLabel(
+                text='Фотопериодизм:',
+                toolTip='реакция на изменение длин светового дня',
+                toolTipDuration=2000,
+            ),
+        )
+        self.select_photoperiodism = QListWidget()
+        items = (
+            ('Длиннодневные (зацветают при удлинении свет. дня)', 1),
+            ('Короткодневные (зацветают при укорочении свет. дня)', 2),
+            ('Нейтральные (цветут при неизменной длине свет. дня)', 3),
+        )
+        for item_name, item_id in items:
+            item_widget = QListWidgetItem(item_name)
+            item_widget.setData(Qt.ItemDataRole.UserRole, item_id)
+            self.select_photoperiodism.addItem(item_widget)
+            if profile_data.get('photoperiodism') == item_id:
+                self.select_photoperiodism.setCurrentItem(item_widget)
+
+        self.select_photoperiodism.setMaximumHeight(25*3)
+        layout.addWidget(self.select_photoperiodism)
+
+        group = QGroupBox('Генерация управляющей программы')
+
+        layout_group = QVBoxLayout()
+        layout_group.addWidget(QLabel('Режим роста:'))
+
+        layout_mode = QHBoxLayout()
+        radio_group = QButtonGroup()
+        for radio_name, radio_id in (('Генеративный', 1), ('Вегетативный', 2)):
+            radio_item = QRadioButton(radio_name)
+            layout_mode.addWidget(radio_item)
+            radio_group.addButton(radio_item)
+            radio_group.setId(radio_item, radio_id)
+            if self.grow_mode == radio_id:
+                radio_item.setChecked(True)
+
+        radio_group.idClicked.connect(self.btn_set_grow_mode_clicked)
+        layout_group.addLayout(layout_mode)
+
+        button = QPushButton('Сгенерировать G-код')
+        button.clicked.connect(self.btn_generate_gcode_clicked)
+        layout_group.addWidget(button)
+        group.setLayout(layout_group)
+
+        layout.addWidget(group)
+
+        widget = QWidget()
+        widget.setLayout(layout)
+
+        self.start_menubar()
+
+        self.setCentralWidget(widget)
 
 
 class MainWindow(QMainWindow):
@@ -854,6 +1034,18 @@ class MainWindow(QMainWindow):
         window = MainPanelWindow('create', None, file_path=None)
         self.main_panel_windows.append(window)
         window.show()
+
+    def btn_create_plant_profile_clicked(self, checked):
+        window = PlantProfileWindow()
+        self.plant_profile_windows.append(window)
+        window.show()
+
+    def btn_open_plant_profile_clicked(self, checked):
+        file_path, mask = QFileDialog.getOpenFileName(self, 'Открытие профиля растения', '~', '*.yaml')
+        if file_path:
+            window = PlantProfileWindow(file_path=Path(file_path))
+            self.plant_profile_windows.append(window)
+            window.show()
 
     def btn_connect_serial_clicked(self, checked):
         dlg = SelectSerialPortDialog()
@@ -883,6 +1075,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.main_panel_windows = []
+        self.plant_profile_windows = []
         self.setWindowTitle('CNC Growbox')
         layout = QVBoxLayout()
 
@@ -890,7 +1083,7 @@ class MainWindow(QMainWindow):
         button.clicked.connect(self.btn_create_gcode_clicked)
         layout.addWidget(button)
 
-        button = QPushButton('Открыть G-код')
+        button = QPushButton('Открыть управляющую программу')
         button.clicked.connect(self.btn_open_gcode_clicked)
         layout.addWidget(button)
 
@@ -905,6 +1098,15 @@ class MainWindow(QMainWindow):
         # button = QPushButton('Подключиться по HTTP')
         # button.clicked.connect(self.btn_connect_http_clicked)
         # layout.addWidget(button)
+
+        button = QPushButton('Создать профиль растения')
+        button.clicked.connect(self.btn_create_plant_profile_clicked)
+        layout.addWidget(button)
+
+        button = QPushButton('Открыть профиль растения')
+        button.clicked.connect(self.btn_open_plant_profile_clicked)
+        layout.addWidget(button)
+
 
         widget = QWidget()
         widget.setLayout(layout)
