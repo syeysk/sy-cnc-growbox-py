@@ -17,6 +17,16 @@ from gcode_builder import GrowboxGCodeBuilder, AutoCycleHard, AutoCycleSoft, Aut
 from gcode_parser import parse_gcode_line
 from thread_tools import SerialWorkersManager
 
+SHADE_AVOIDANCE = 1
+SHADE_TOLERANCE = 2
+
+LONG_DAY = 1
+SHORT_DAY = 2
+DAY_NEUTRAL = 3
+
+VEGETATIVE_GROWING = 1
+GENERATIVE_GROWING = 2
+
 
 def parse_and_bufferize_gcode_line(buff_json, gcode_line):
     gcode = parse_gcode_line(gcode_line)
@@ -91,8 +101,43 @@ def buff2gcode(buff_json, gcode):
                 auto.turn(actuator, value)
 
 
-def generate_gcode(gcode: GrowboxGCodeBuilder, profile_data: dict):
+def generate_gcode(gcode: GrowboxGCodeBuilder, profile_data: dict, grow_mode: int):
+    cycle_hard = gcode.cycle_hard
+    cycle_soft = gcode.cycle_soft
+    a_white_light = gcode.a_white_light
+    a_fred_light = gcode.a_fred_light
+
+    shade_reaction = profile_data['shade_reaction']
+    photoperiodism = profile_data['photoperiodism']
+
+    len_light_day = 12 * 60
+    len_sunrise_day = 10
+    # if shade_reaction == SHADE_AVOIDANCE:
+    #     gcode.a_fred_light.set(0)  # чтобы растение не вытягивалось
+
+    if photoperiodism == LONG_DAY:
+        if grow_mode == GENERATIVE_GROWING:
+            len_light_day = 14 * 60
+        else:
+            len_light_day = 12 * 60
+    elif photoperiodism == SHORT_DAY:
+        if grow_mode == GENERATIVE_GROWING:
+            len_light_day = 11 * 60
+        else:
+            len_light_day = 14 * 60
+
     gcode.turn_off_all_autos()
+
+    # Настройка белого света
+    cycle_soft.set_value(a_white_light, cycle_soft.DAY, 255)
+    cycle_soft.set_value(a_white_light, cycle_soft.NIGHT, 0)
+    cycle_soft.set_duration(a_white_light, cycle_soft.SUNRISE, len_sunrise_day)
+    cycle_soft.set_duration(a_white_light, cycle_soft.DAY, len_light_day - len_sunrise_day)
+    cycle_soft.set_duration(a_white_light, cycle_soft.SUNSET, 10)
+    cycle_soft.set_duration(a_white_light, cycle_soft.NIGHT, 590)
+    cycle_soft.turn(a_white_light, True)
+
+    # Настройка дальнего красного света
 
 
 class SetValueDialog(QDialog):
@@ -894,7 +939,7 @@ class PlantProfileWindow(QMainWindow):
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение G-код', default_file_name, '*.gcode')
         if file_path:
             with open(file_path, 'w') as output_file:
-                generate_gcode(GrowboxGCodeBuilder(output=file_object), profile_data)
+                generate_gcode(GrowboxGCodeBuilder(output=output_file), profile_data, self.grow_mode)
 
             if not self.file_path:
                 self.file_path = Path(file_path)
@@ -919,7 +964,7 @@ class PlantProfileWindow(QMainWindow):
     def __init__(self, file_path: Path | None = None):
         super().__init__()
         self.file_path = file_path
-        self.grow_mode = 1
+        self.grow_mode = VEGETATIVE_GROWING
         self.progress_bar = QLabel()
         self.statusBar().addPermanentWidget(self.progress_bar)
 
@@ -948,7 +993,10 @@ class PlantProfileWindow(QMainWindow):
             ),
         )
         self.select_shade_reaction = QListWidget()
-        items = (('Теневыносливые (увеличивают листья)', 1), ('Теневые избегатели (вытягивают стебель)', 2))
+        items = (
+            ('Теневые избегатели (вытягивают стебель)', SHADE_AVOIDANCE),
+            ('Теневыносливые (увеличивают листья)', SHADE_TOLERANCE),
+        )
         for item_name, item_id in items:
             item_widget = QListWidgetItem(item_name)
             item_widget.setData(Qt.ItemDataRole.UserRole, item_id)
@@ -968,9 +1016,9 @@ class PlantProfileWindow(QMainWindow):
         )
         self.select_photoperiodism = QListWidget()
         items = (
-            ('Длиннодневные (зацветают при удлинении свет. дня)', 1),
-            ('Короткодневные (зацветают при укорочении свет. дня)', 2),
-            ('Нейтральные (цветут при неизменной длине свет. дня)', 3),
+            ('Длиннодневные (зацветают при удлинении свет. дня)', LONG_DAY),
+            ('Короткодневные (зацветают при укорочении свет. дня)', SHORT_DAY),
+            ('Нейтральные (цветут при неизменной длине свет. дня)', DAY_NEUTRAL),
         )
         for item_name, item_id in items:
             item_widget = QListWidgetItem(item_name)
@@ -985,11 +1033,11 @@ class PlantProfileWindow(QMainWindow):
         group = QGroupBox('Генерация управляющей программы')
 
         layout_group = QVBoxLayout()
-        layout_group.addWidget(QLabel('Режим роста:'))
+        layout_group.addWidget(QLabel('Желаемый тип развития растения:'))
 
         layout_mode = QHBoxLayout()
         radio_group = QButtonGroup()
-        for radio_name, radio_id in (('Генеративный', 1), ('Вегетативный', 2)):
+        for radio_name, radio_id in (('Вегетативный', VEGETATIVE_GROWING), ('Генеративный', GENERATIVE_GROWING)):
             radio_item = QRadioButton(radio_name)
             layout_mode.addWidget(radio_item)
             radio_group.addButton(radio_item)
