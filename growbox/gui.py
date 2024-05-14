@@ -1147,14 +1147,13 @@ class MainWindow(QMainWindow):
         # button.clicked.connect(self.btn_connect_http_clicked)
         # layout.addWidget(button)
 
-        button = QPushButton('Создать профиль растения')
-        button.clicked.connect(self.btn_create_plant_profile_clicked)
-        layout.addWidget(button)
+        # button = QPushButton('Создать профиль растения')
+        # button.clicked.connect(self.btn_create_plant_profile_clicked)
+        # layout.addWidget(button)
 
-        button = QPushButton('Открыть профиль растения')
-        button.clicked.connect(self.btn_open_plant_profile_clicked)
-        layout.addWidget(button)
-
+        # button = QPushButton('Открыть профиль растения')
+        # button.clicked.connect(self.btn_open_plant_profile_clicked)
+        # layout.addWidget(button)
 
         widget = QWidget()
         widget.setLayout(layout)
