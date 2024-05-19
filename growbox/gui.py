@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 
+import requests
 import serial
 import yaml
 from PyQt6.QtCore import Qt
@@ -138,6 +139,32 @@ def generate_gcode(gcode: GrowboxGCodeBuilder, profile_data: dict, grow_mode: in
     cycle_soft.turn(a_white_light, True)
 
     # Настройка дальнего красного света
+
+
+class HttpAdapter:
+    def __init__(self, url):
+        self.url = url
+        self.mode = 'w'
+        self.response_data = ''
+
+    def write(self, row_string):
+        params = {'action': 'send_to_serial', 'string_data': row_string, 'timeout_read': 2500}
+        response = None
+        try:
+            response = requests.post(f'{self.url}/api.c', params=params, timeout=4)
+        except requests.ReadTimeout as error:
+            print('read:', str(error), 'gcode:', row_string)
+        except requests.ConnectTimeout as error:
+            print('connect:', str(error), 'gcode:', row_string)
+
+        if response and response.status_code == 200:
+            string_response_data = response.json()['data']['string_response_data']
+            self.response_data = f'{self.response_data}{string_response_data}'
+
+    def read(self, length):
+        data_to_return = self.response_data[:length]
+        self.response_data = self.response_data[length:]
+        return data_to_return.encode()
 
 
 class SetValueDialog(QDialog):
@@ -748,7 +775,7 @@ class MainPanelWindow(QMainWindow):
         def result_sensors(data):
             sensor_code, value = data
             if value is None:
-                self.sensor_widgets[int(sensor_code)].setText('-')
+                self.sensor_widgets[int(sensor_code)].setText('Не удалось получить')
             else:
                 self.sensor_widgets[int(sensor_code)].setText(str(value))
 
@@ -808,6 +835,14 @@ class MainPanelWindow(QMainWindow):
             )
             self.gcode = GrowboxGCodeBuilder(
                 self.serial,
+                callback_answer=lambda s: self.print_to_log(s, True),
+                callback_write=lambda s: self.callback_write(s, True),
+            )
+        elif open_type == 'connect' and open_subtype == 'http':
+            self.print_to_status_bar(data['url'], 1)
+            http_adapter = HttpAdapter(data['url'])
+            self.gcode = GrowboxGCodeBuilder(
+                http_adapter,
                 callback_answer=lambda s: self.print_to_log(s, True),
                 callback_write=lambda s: self.callback_write(s, True),
             )
@@ -881,6 +916,29 @@ class SelectSerialPortDialog(QDialog):
         layout.addWidget(self.input_port)
         layout.addWidget(QLabel('Выберите скорость:'))
         layout.addWidget(self.input_baudrate)
+        layout.addLayout(layout_grid)
+        layout.addWidget(button_box)
+        self.setLayout(layout)
+
+
+class SelectHttpDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f'Подключение к гроубоксу')
+
+        buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        button_box = QDialogButtonBox(buttons)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+
+        layout = QVBoxLayout()
+
+        self.input_url = QLineEdit('http://192.168.0.0')
+
+        layout_grid = QGridLayout()
+        layout_grid.addWidget(QLabel('URL подключения:'), 0, 0)
+        layout_grid.addWidget(self.input_url, 0, 1)
+
         layout.addLayout(layout_grid)
         layout.addWidget(button_box)
         self.setLayout(layout)
@@ -1120,6 +1178,18 @@ class MainWindow(QMainWindow):
                 self.main_panel_windows.append(window)
                 window.show()
 
+    def btn_connect_http_clicked(self, checked):
+        dlg = SelectHttpDialog()
+        if dlg.exec():
+            input_url = dlg.input_url.text()
+            if input_url:
+                data = {
+                    'url': input_url,
+                }
+                window = MainPanelWindow('connect', 'http', file_path=None, data=data)
+                self.main_panel_windows.append(window)
+                window.show()
+
     def __init__(self):
         super().__init__()
         self.main_panel_windows = []
@@ -1143,9 +1213,9 @@ class MainWindow(QMainWindow):
         button.clicked.connect(self.btn_connect_serial_clicked)
         layout.addWidget(button)
 
-        # button = QPushButton('Подключиться по HTTP')
-        # button.clicked.connect(self.btn_connect_http_clicked)
-        # layout.addWidget(button)
+        button = QPushButton('Подключиться по HTTP')
+        button.clicked.connect(self.btn_connect_http_clicked)
+        layout.addWidget(button)
 
         # button = QPushButton('Создать профиль растения')
         # button.clicked.connect(self.btn_create_plant_profile_clicked)

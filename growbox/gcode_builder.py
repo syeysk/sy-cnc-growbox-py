@@ -20,7 +20,7 @@ class WriterInterface:
         self.callback_answer = callback_answer
         self.callback_write = callback_write
         if need_wait_answer is None:
-            self.need_wait_answer = isinstance(output, serial.Serial)
+            self.need_wait_answer = hasattr(output, 'read') #isinstance(output, serial.Serial)
         else:
             self.need_wait_answer = need_wait_answer
 
