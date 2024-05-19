@@ -149,17 +149,16 @@ class HttpAdapter:
 
     def write(self, row_string):
         params = {'action': 'send_to_serial', 'string_data': row_string, 'timeout_read': 2500}
-        response = None
         try:
             response = requests.post(f'{self.url}/api.c', params=params, timeout=4)
         except requests.ReadTimeout as error:
             print('read:', str(error), 'gcode:', row_string)
         except requests.ConnectTimeout as error:
             print('connect:', str(error), 'gcode:', row_string)
-
-        if response and response.status_code == 200:
-            string_response_data = response.json()['data']['string_response_data']
-            self.response_data = f'{self.response_data}{string_response_data}'
+        else:
+            if response.status_code == 200:
+                string_response_data = response.json()['data']['string_response_data']
+                self.response_data = f'{self.response_data}{string_response_data}'
 
     def read(self, length):
         data_to_return = self.response_data[:length]
