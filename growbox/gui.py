@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 )
 from serial.tools.list_ports import comports
 
-from gcode_builder import GrowboxGCodeBuilder, AutoCycleHard, AutoCycleSoft, AutoClimateControl
+from gcode_builder import GrowboxGCodeBuilder, AutoCycleHard, AutoCycleSoft, AutoClimateControl, AutoTimer
 from gcode_parser import parse_gcode_line
 from thread_tools import SerialWorkersManager
 
@@ -27,7 +27,6 @@ DAY_NEUTRAL = 3
 
 VEGETATIVE_GROWING = 1
 GENERATIVE_GROWING = 2
-
 
 def parse_and_bufferize_gcode_line(buff_json, gcode_line):
     gcode = parse_gcode_line(gcode_line)
@@ -45,20 +44,16 @@ def parse_and_bufferize_gcode_line(buff_json, gcode_line):
 
     if gcode.command == 'E0':
         buff_json.setdefault('actuators', {}).setdefault(str(gcode['A']), {})['value'] = gcode['V']
-    elif gcode.command == 'E100':
-        buff_json.setdefault(str(AutoCycleHard.CODE), {}).setdefault(str(gcode['A']), {})['turn'] = gcode['B']
+    elif gcode.command == 'E3' and 'R' in gcode and 'A' in gcode:
+        buff_json.setdefault(str(gcode['R']), {}).setdefault(str(gcode['A']), {})['turn'] = gcode['B']
     elif gcode.command == 'E101':
         buff_json.setdefault(str(AutoCycleHard.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['B']), {})['duration'] = str(gcode['D'])
     elif gcode.command == 'E103':
         buff_json.setdefault(str(AutoCycleHard.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['B']), {})['value'] = str(gcode['V'])
-    elif gcode.command == 'E150':
-        buff_json.setdefault(str(AutoCycleSoft.CODE), {}).setdefault(str(gcode['A']), {})['turn'] = gcode.params['B']
     elif gcode.command == 'E151':
         buff_json.setdefault(str(AutoCycleSoft.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['P']), {})['duration'] = str(gcode['D'])
     elif gcode.command == 'E153':
         buff_json.setdefault(str(AutoCycleSoft.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['P']), {})['value'] = str(gcode['V'])
-    elif gcode.command == 'E200':
-        buff_json.setdefault(str(AutoClimateControl.CODE), {}).setdefault(str(gcode['A']), {})['turn'] = gcode['B']
     elif gcode.command == 'E201':
         buff_json.setdefault(str(AutoClimateControl.CODE), {}).setdefault(str(gcode['A']), {})['sensor'] = gcode['S']
     elif gcode.command == 'E202':
@@ -478,6 +473,30 @@ class AutoClimateControlWindow(BaseAutoWindow):
         self.worker_manager.add_and_start_worker(result_update, task_update)
 
 
+class AutoTimerWindow(BaseAutoWindow):
+    def update(self, checked=None):
+        def result_update(data):
+            pass
+
+        def task_update():
+            pass
+
+        self.worker_manager.add_and_start_worker(result_update, task_update)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel(f'Автоматика включения по таймеру для устройства "{self.actuator_name}"'))
+        layout.addWidget(self.checkbox_turn)
+        self.setLayout(layout)
+
+        if self.open_type == 'connect':
+            button_update = QPushButton('Обновить')
+            button_update.clicked.connect(self.update)
+            layout.addWidget(button_update)
+            self.update()
+
+
 class YesNoDialog(QDialog):
     def __init__(self, parent=None, text_title='', text_info='', text_question=''):
         super().__init__(parent)
@@ -597,6 +616,28 @@ class MainPanelWindow(QMainWindow):
             # menu_file.addAction(button_action_send_json)
             menu_file.addAction(button_action_send_gcode)
 
+    def apply_gcode_to_gui(self, gcode_line):
+        parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
+
+    def open_time_window_clicked(self, checked):
+        print('window is openned')
+
+    def build_groupbox_time(self):
+        layout = QHBoxLayout()
+        self.label_time = QLabel('--:--')
+        button_open_time_window = QPushButton('✎')
+        button_open_time_window.clicked.connect(self.open_time_window_clicked)
+        layout.addWidget(self.label_time)
+        layout.addWidget(button_open_time_window)
+
+        groupbox = QGroupBox('Время')
+        # groupbox.setStyleSheet("""
+        #     QGroupBox QLabel {color: #999999;}
+        # """)
+        groupbox.setLayout(layout)
+
+        return groupbox
+
     def build_groupbox_sensors(self):
         layout = QGridLayout()
 
@@ -629,6 +670,7 @@ class MainPanelWindow(QMainWindow):
             self.gcode.cycle_hard.CODE: AutoCycleHardWindow,
             self.gcode.cycle_soft.CODE: AutoCycleSoftWindow,
             self.gcode.climate_control.CODE: AutoClimateControlWindow,
+            self.gcode.timer.CODE: AutoTimerWindow,
         }
         window_class = auto_windows_classes[gcode_auto.CODE]
         window_key = (gcode_auto.CODE, actuator_code)
@@ -716,6 +758,7 @@ class MainPanelWindow(QMainWindow):
         layout_table.addWidget(QLabel('Резкий переход'), 0, 1)
         layout_table.addWidget(QLabel('Плавный переход'), 0, 2)
         layout_table.addWidget(QLabel('Климат-контроль'), 0, 3)
+        layout_table.addWidget(QLabel('Таймер'), 0, 4)
 
         actuators = [
             ('Белый свет', self.gcode.A_WHITE_LIGHT),
@@ -759,7 +802,7 @@ class MainPanelWindow(QMainWindow):
             self.worker_manager.current_worker.signals.callback_write.emit(gcode_line)
         else:
             self.print_to_log(gcode_line)
-            parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
+            self.apply_gcode_to_gui(gcode_line)
 
     def worker_update_from_serial(self):
         def result_autos(data):
@@ -780,6 +823,14 @@ class MainPanelWindow(QMainWindow):
 
         def get_sensors(sensor_code):
             return sensor_code, self.gcode.sensors[int(sensor_code)].get()
+
+        def result_time(data):
+            self.label_time.setText(f'{data[0]:02}:{data[1]:02}')
+
+        def get_time():
+            return self.gcode.get_time()
+
+        self.worker_manager.add_and_start_worker(result_time, get_time)
 
         for sensor_code, sensor in self.gcode.sensors.items():
             self.worker_manager.add_and_start_worker(result_sensors, get_sensors, sensor.code)
@@ -805,6 +856,7 @@ class MainPanelWindow(QMainWindow):
             print_to_log=self.print_to_log,
             callback_write=self.callback_write,
         )
+        self.label_time = None
 
         self.setWindowTitle('Управляющая программа')
 
@@ -820,7 +872,7 @@ class MainPanelWindow(QMainWindow):
             self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
             with file_path.open() as gcode_file:
                 for gcode_line in gcode_file:
-                    parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
+                    self.apply_gcode_to_gui(gcode_line)
         elif open_type == 'create':
             self.print_to_status_bar('Новый файл', 1)
             self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
@@ -850,6 +902,7 @@ class MainPanelWindow(QMainWindow):
         self.start_menubar()
 
         if open_type == 'connect':
+            layout.addWidget(self.build_groupbox_time())
             layout.addWidget(self.build_groupbox_sensors())
 
         groupbox_actuators = self.build_groupbox_actuators()
@@ -899,7 +952,7 @@ class SelectSerialPortDialog(QDialog):
         for baudrate in [4800, 9600, 19200, 38400, 76800, 153600]:
             widget_item_baudrate = QListWidgetItem(str(baudrate), self.input_baudrate)
             widget_item_baudrate.setData(Qt.ItemDataRole.UserRole, baudrate)
-            if baudrate == 9600:
+            if baudrate == 38400:
                 self.input_baudrate.setCurrentItem(widget_item_baudrate)
 
         self.input_timeout_read = QLineEdit('2.2')
@@ -1237,5 +1290,11 @@ def run():
     app.exec()
 
 
+# handle fatal errors according to https://stackoverflow.com/questions/33736819/pyqt-no-error-msg-traceback-on-exit
+def except_hook(cls, exception, traceback):
+    sys.__excepthook__(cls, exception, traceback)
+
+
 if __name__ == '__main__':
+    sys.excepthook = except_hook
     run()

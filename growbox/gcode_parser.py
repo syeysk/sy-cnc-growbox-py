@@ -11,6 +11,9 @@ class GCodeLine:
     def __getitem__(self, key):
         return self.params[key.upper()]
 
+    def __contains__(self, key):
+        return key.upper() in self.params
+
 
 def parse_gcode_line(gcode_line):
     gcode_parts = gcode_line.split()

@@ -105,7 +105,22 @@ class Sensor:
         return None if value.upper() == 'NAN' else float(value)
 
 
-class AutoCycleHard:
+class BaseAuto:
+    CODE = None
+
+    def __init__(self, output: WriterInterface):
+        self.output = output
+
+    def turn(self, actuator: Actuator | int | str, status: bool):
+        return self.output.write(f'E3 R{self.CODE} A{actuator} B{int(status)}')
+
+    def is_turn(self, actuator: Actuator | int | str) -> bool:
+        answer = self.output.write(f'E4 R{self.CODE} A{actuator}', 2)
+        answer_lines = answer.decode().split('\r\n')
+        return bool(float(answer_lines[0][2:]))
+
+
+class AutoCycleHard(BaseAuto):
     CODE = 0
     DEFAULT_TURN = False
     DEFAULT_VALUE = 0
@@ -114,18 +129,6 @@ class AutoCycleHard:
     DAY = 1
     NIGHT = 0
     PERIODS = [DAY, NIGHT]
-
-    def __init__(self, output: WriterInterface):
-        self.output = output
-
-    # @dec('E100', 'cycle_hard_turn', a='actuator', b='status')
-    def turn(self, actuator: Actuator | int | str, status: bool):
-        return self.output.write(f'E100 A{actuator} B{int(status)}')
-
-    def is_turn(self, actuator: Actuator | int | str) -> bool:
-        answer = self.output.write(f'E1001 A{actuator}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return bool(float(answer_lines[0][2:]))
 
     def get_current(self, actuator: Actuator | int | str):
         answer = self.output.write(f'E102 A{actuator}', 3)
@@ -149,7 +152,7 @@ class AutoCycleHard:
         return int(float(answer_lines[0][2:]))
 
 
-class AutoCycleSoft:
+class AutoCycleSoft(BaseAuto):
     CODE = 1
     DEFAULT_TURN = False
     DEFAULT_VALUE = 0
@@ -160,18 +163,6 @@ class AutoCycleSoft:
     SUNSET = 2
     NIGHT = 3
     PERIODS = [SUNRISE, DAY, SUNSET, NIGHT]
-
-    def __init__(self, output: WriterInterface):
-        self.output = output
-
-    # @dec('E150', 'cycle_soft_turn', a='actuator', b='status')
-    def turn(self, actuator: Actuator | int | str, status: bool):
-        return self.output.write(f'E150 A{actuator} B{int(status)}')
-
-    def is_turn(self, actuator: Actuator | int | str) -> bool:
-        answer = self.output.write(f'E1501 A{actuator}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return bool(float(answer_lines[0][2:]))
 
     def get_current(self, actuator: Actuator | int | str):
         answer = self.output.write(f'E152 A{actuator}', 3)
@@ -195,23 +186,11 @@ class AutoCycleSoft:
         return int(float(answer_lines[0][2:]))
 
 
-class AutoClimateControl:
+class AutoClimateControl(BaseAuto):
     CODE = 2
     DEFAULT_TURN = False
     DEFAULT_MIN = 0
     DEFAULT_MAX = 0
-
-    def __init__(self, output: WriterInterface):
-        self.output = output
-
-    # @dec('E200', 'climate_control_turn', a='actuator', b='status')
-    def turn(self, actuator: Actuator | int | str, status: bool):
-        return self.output.write(f'E200 A{actuator} B{int(status)}')
-
-    def is_turn(self, actuator: Actuator | int | str) -> bool:
-        answer = self.output.write(f'E2001 A{actuator}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return bool(float(answer_lines[0][2:]))
 
     def set_min(self, actuator: Actuator | int | str, value: int):
         return self.output.write(f'E202 A{actuator} V{value}')
@@ -236,6 +215,11 @@ class AutoClimateControl:
         answer = self.output.write(f'E2011 A{actuator}', 2)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:]))
+
+
+class AutoTimer(BaseAuto):
+    CODE = 3
+    DEFAULT_TURN = False
 
 
 class GrowboxGCodeBuilder:
@@ -270,17 +254,27 @@ class GrowboxGCodeBuilder:
         self.cycle_hard = AutoCycleHard(self.output)
         self.cycle_soft = AutoCycleSoft(self.output)
         self.climate_control = AutoClimateControl(self.output)
+        self.timer = AutoTimer(self.output)
         self.autos = {
             self.cycle_hard.CODE: self.cycle_hard,
             self.cycle_soft.CODE: self.cycle_soft,
             self.climate_control.CODE: self.climate_control,
+            self.timer.CODE: self.timer,
         }
+
+    def write(self, gcode_line: str, count_lines=1):
+        return self.output.write(gcode_line, count_lines)
 
     def turn_off_all_autos(self):
         return self.output.write('E3')
 
-    def write(self, gcode_line: str, count_lines=1):
-        return self.output.write(gcode_line, count_lines)
+    def get_time(self):
+        answer = self.output.write('E81', 3)
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:])), int(float(answer_lines[1][2:]))
+
+    def set_time(self, hours, minutes):
+        return self.output.write(f'E8 H{hours} M{minutes}')
 
 
 if __name__ == '__main__':
