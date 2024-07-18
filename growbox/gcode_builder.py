@@ -24,7 +24,27 @@ class WriterInterface:
         else:
             self.need_wait_answer = need_wait_answer
 
-    def write(self, data: str):
+    def read_until_end(self, count_lines=1, end_byte=b'\n'):
+        received_bytes = []
+        for _ in range(100):
+            received_byte = self.output.read(1)
+            if not received_byte:
+                break
+
+            received_bytes.append(received_byte)
+            if received_byte == end_byte:
+                count_lines -= 1
+
+            if count_lines == 0:
+                break
+
+        return b''.join(received_bytes)
+
+    def write(self, data: str, count_lines_to_receive=1, timeout=None):
+        if timeout:
+            prev_timeout = self.output.timeout
+            self.output.timeout = timeout
+
         answer = None
         data = f'{data}\n'
         mode = getattr(self.output, 'mode', 'wb')
@@ -38,9 +58,13 @@ class WriterInterface:
 
         self.output.write(data)
         if self.need_wait_answer:
-            answer = self.output.read(100)
+            answer = self.read_until_end(count_lines_to_receive)  # self.output.read(100)
+            # answer = self.output.read(100)
             if self.callback_answer:
                 self.callback_answer(answer)
+
+        if timeout:
+            self.output.timeout = prev_timeout
 
         return answer
 
@@ -75,10 +99,10 @@ class Sensor:
         return str(self.code)
 
     def get(self):
-        answer = self.output.write(f'E2 S{self.code}')
+        answer = self.output.write(f'E2 S{self.code}', 2, 2.2)
         answer_lines = answer.decode().split('\r\n')
         value = answer_lines[0][2:].strip()
-        return None if value == 'NAN' else float(value)
+        return None if value.upper() == 'NAN' else float(value)
 
 
 class AutoCycleHard:
@@ -99,12 +123,12 @@ class AutoCycleHard:
         return self.output.write(f'E100 A{actuator} B{int(status)}')
 
     def is_turn(self, actuator: Actuator | int | str) -> bool:
-        answer = self.output.write(f'E1001 A{actuator}')
+        answer = self.output.write(f'E1001 A{actuator}', 2)
         answer_lines = answer.decode().split('\r\n')
         return bool(float(answer_lines[0][2:]))
 
     def get_current(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E102 A{actuator}')
+        answer = self.output.write(f'E102 A{actuator}', 3)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:])), int(float(answer_lines[1][2:]))
 
@@ -112,7 +136,7 @@ class AutoCycleHard:
         return self.output.write(f'E101 A{actuator} B{period} D{duration}')
 
     def get_duration(self, actuator: Actuator | int | str, period: int):
-        answer = self.output.write(f'E1011 A{actuator} B{period}')
+        answer = self.output.write(f'E1011 A{actuator} B{period}', 2)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:]))
 
@@ -120,7 +144,7 @@ class AutoCycleHard:
         return self.output.write(f'E103 A{actuator} B{period} V{value}')
 
     def get_value(self, actuator: Actuator | int | str, period: int):
-        answer = self.output.write(f'E1031 A{actuator} B{period}')
+        answer = self.output.write(f'E1031 A{actuator} B{period}', 2)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:]))
 
@@ -145,12 +169,12 @@ class AutoCycleSoft:
         return self.output.write(f'E150 A{actuator} B{int(status)}')
 
     def is_turn(self, actuator: Actuator | int | str) -> bool:
-        answer = self.output.write(f'E1501 A{actuator}')
+        answer = self.output.write(f'E1501 A{actuator}', 2)
         answer_lines = answer.decode().split('\r\n')
         return bool(float(answer_lines[0][2:]))
 
     def get_current(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E152 A{actuator}')
+        answer = self.output.write(f'E152 A{actuator}', 3)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:])), int(float(answer_lines[1][2:]))
 
@@ -158,7 +182,7 @@ class AutoCycleSoft:
         return self.output.write(f'E151 A{actuator} P{period} D{duration}')
 
     def get_duration(self, actuator: Actuator | int | str, period: int):
-        answer = self.output.write(f'E1511 A{actuator} P{period}')
+        answer = self.output.write(f'E1511 A{actuator} P{period}', 2)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:]))
 
@@ -166,7 +190,7 @@ class AutoCycleSoft:
         return self.output.write(f'E153 A{actuator} P{period} V{value}')
 
     def get_value(self, actuator: Actuator | int | str, period: int):
-        answer = self.output.write(f'E1531 A{actuator} P{period}')
+        answer = self.output.write(f'E1531 A{actuator} P{period}', 2)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:]))
 
@@ -185,7 +209,7 @@ class AutoClimateControl:
         return self.output.write(f'E200 A{actuator} B{int(status)}')
 
     def is_turn(self, actuator: Actuator | int | str) -> bool:
-        answer = self.output.write(f'E2001 A{actuator}')
+        answer = self.output.write(f'E2001 A{actuator}', 2)
         answer_lines = answer.decode().split('\r\n')
         return bool(float(answer_lines[0][2:]))
 
@@ -193,7 +217,7 @@ class AutoClimateControl:
         return self.output.write(f'E202 A{actuator} V{value}')
 
     def get_min(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E2021 A{actuator}')
+        answer = self.output.write(f'E2021 A{actuator}', 2)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:]))
 
@@ -201,7 +225,7 @@ class AutoClimateControl:
         return self.output.write(f'E203 A{actuator} V{value}')
 
     def get_max(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E2031 A{actuator}')
+        answer = self.output.write(f'E2031 A{actuator}', 2)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:]))
 
@@ -209,7 +233,7 @@ class AutoClimateControl:
         return self.output.write(f'E201 A{actuator} S{sensor}')
 
     def get_sensor(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E2011 A{actuator}')
+        answer = self.output.write(f'E2011 A{actuator}', 2)
         answer_lines = answer.decode().split('\r\n')
         return int(float(answer_lines[0][2:]))
 
@@ -255,8 +279,8 @@ class GrowboxGCodeBuilder:
     def turn_off_all_autos(self):
         return self.output.write('E3')
 
-    def write(self, gcode_line: str):
-        return self.output.write(gcode_line)
+    def write(self, gcode_line: str, count_lines=1):
+        return self.output.write(gcode_line, count_lines)
 
 
 if __name__ == '__main__':

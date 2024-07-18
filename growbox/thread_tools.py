@@ -47,7 +47,8 @@ class SerialWorkersManager:
             if result_func:
                 result_func(any_data)
         except Exception as err:
-            print(err)
+            print('ERROR in result function:', result_func.__name__)
+            print('   ', err)
 
         if self.workers:
             worker = self.workers.pop(0)
@@ -58,7 +59,14 @@ class SerialWorkersManager:
             self.is_started = False
 
     def add_and_start_worker(self, result_func, task_func, *args, **kwargs):
-        worker = Worker(task_func, *args, **kwargs)
+        def safe_task_func(*args, **kwargs):
+            try:
+                return task_func(*args, **kwargs)
+            except Exception as err:
+                print('ERROR in task function:', task_func.__name__)
+                print('   ', err)
+
+        worker = Worker(safe_task_func, *args, **kwargs)
         worker.signals.result.connect(lambda any_data: self.run_next_worker(any_data, result_func))
         worker.signals.print_to_log.connect(self.print_to_log)
         worker.signals.callback_write.connect(self.callback_write)
