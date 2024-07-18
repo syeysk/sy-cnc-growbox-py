@@ -276,6 +276,14 @@ class GrowboxGCodeBuilder:
     def set_time(self, hours, minutes):
         return self.output.write(f'E8 H{hours} M{minutes}')
 
+    def get_time_source(self):
+        answer = self.output.write('E91', 2)
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:]))
+
+    def set_time_source(self, source_code):
+        return self.output.write(f'E9 T{source_code}')
+
 
 if __name__ == '__main__':
     from serial.tools.list_ports import comports

@@ -497,6 +497,73 @@ class AutoTimerWindow(BaseAutoWindow):
             self.update()
 
 
+class TimeWindow(QWidget):
+    is_closed = False
+
+    def closeEvent(self, *args, **kwargs):
+        super().closeEvent(*args, **kwargs)
+        self.is_closed = True
+
+    def update(self, checked=None):
+        def result_time(data):
+            self.label_time.setText(f'{data[0]:02}:{data[1]:02}')
+            self.field_hours.setText(str(data[0]))
+            self.field_minutes.setText(str(data[1]))
+
+        def get_time():
+            return self.gcode.get_time()
+
+        self.worker_manager.add_and_start_worker(result_time, get_time)
+
+    def set_time_clicked(self):
+        self.gcode.set_time(int(self.field_hours.text()), int(self.field_minutes.text()))
+
+    def __init__(
+            self,
+            gcode: GrowboxGCodeBuilder,
+            buff_json: dict,
+            label_time,
+            open_type,
+            worker_manager,
+            parent=None,
+    ):
+        super().__init__(parent=parent)
+        self.label_time = label_time
+        self.gcode = gcode
+        self.open_type = open_type
+        self.worker_manager = worker_manager
+        self.buff_json = buff_json
+        self.setWindowTitle(f'Настройка автоматики')
+
+        self.field_hours = QLineEdit()
+        self.field_hours.setInputMask(r'09')
+        self.field_minutes = QLineEdit()
+        self.field_minutes.setInputMask(r'09')
+
+        layout = QVBoxLayout()
+
+        layout_time = QHBoxLayout()
+        layout_time.addWidget(QLabel('Часы:'))
+        layout_time.addWidget(self.field_hours)
+        layout_time.addWidget(QLabel('Минуты:'))
+        layout_time.addWidget(self.field_minutes)
+        btn_set_time = QPushButton('Установить время')
+        btn_set_time.clicked.connect(self.set_time_clicked)
+        layout_time.addWidget(btn_set_time)
+
+        layout_time_source = QHBoxLayout()
+
+        layout.addLayout(layout_time)
+        layout.addLayout(layout_time_source)
+        self.setLayout(layout)
+
+        if self.open_type == 'connect':
+            button_update = QPushButton('Обновить')
+            button_update.clicked.connect(self.update)
+            layout.addWidget(button_update)
+            self.update()
+
+
 class YesNoDialog(QDialog):
     def __init__(self, parent=None, text_title='', text_info='', text_question=''):
         super().__init__(parent)
@@ -620,7 +687,16 @@ class MainPanelWindow(QMainWindow):
         parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
 
     def open_time_window_clicked(self, checked):
-        print('window is openned')
+        if self.window_time is None or self.window_time.is_closed:
+            opened_window = TimeWindow(
+                self.gcode,
+                self.buff_json,
+                self.label_time,
+                self.open_type,
+                self.worker_manager,
+            )
+            self.window_time = opened_window
+            opened_window.show()
 
     def build_groupbox_time(self):
         layout = QHBoxLayout()
@@ -857,6 +933,7 @@ class MainPanelWindow(QMainWindow):
             callback_write=self.callback_write,
         )
         self.label_time = None
+        self.window_time = None
 
         self.setWindowTitle('Управляющая программа')
 
