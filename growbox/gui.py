@@ -10,13 +10,14 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QLineEdit, QGroupBox, QGridLayout,
     QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QTextEdit,
-    QRadioButton, QButtonGroup,
+    QRadioButton, QButtonGroup
 )
 from serial.tools.list_ports import comports
 
 from gcode_builder import GrowboxGCodeBuilder, AutoCycleHard, AutoCycleSoft, AutoClimateControl, AutoTimer
 from gcode_parser import parse_gcode_line
 from thread_tools import SerialWorkersManager
+from set_value_windows import SetValueIntegerDialog, SetValueListDialog, SetValueTimeDialog
 
 SHADE_AVOIDANCE = 1
 SHADE_TOLERANCE = 2
@@ -161,28 +162,6 @@ class HttpAdapter:
         return data_to_return.encode()
 
 
-class SetValueDialog(QDialog):
-    def __init__(self, parent=None, text='', initial_value='0', input_widget=None):
-        super().__init__(parent)
-        self.setWindowTitle(f'Новое значение для "{text}"')
-
-        buttons = QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel
-        button_box = QDialogButtonBox(buttons)
-        button_box.clicked.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-
-        layout = QVBoxLayout()
-        self.input = input_widget
-        if self.input is None:
-            self.input = QLineEdit()
-            self.input.setInputMask(r'999')
-            self.input.setText(initial_value)
-
-        layout.addWidget(self.input)
-        layout.addWidget(button_box)
-        self.setLayout(layout)
-
-
 class BaseAutoWindow(QWidget):
     is_closed = False
 
@@ -223,17 +202,41 @@ class BaseAutoWindow(QWidget):
         self.gcode_auto.turn(actuator=self.actuator_code, status=checked)
         self.turn_checkboxes[f'{self.code}-{self.actuator_code}'].setChecked(checked)
 
+    @staticmethod
+    def format_duration(duration):
+        hours = duration // 60
+        minutes = duration % 60
+        str_hours = f'{hours}ч' if hours else ''
+        str_minutes = f'{minutes}м' if minutes else ''
+        return f'{str_hours} {str_minutes}' if hours or minutes else '0'
+
 
 class AutoCycleHardWindow(BaseAutoWindow):
-    def btn_set_value_clicked(self, checked, period_code, text, label_value, what_set):
-        dlg = SetValueDialog(self, text, label_value.text())
+    def set_duration(self, period_code, duration):
+        str_duration = self.format_duration(duration)
+        self.labels_by_period.setdefault(period_code, {})['duration'].setText(str_duration)
+        self.period_data.setdefault(period_code, {})['duration'] = duration
+
+    def get_duration(self, period):
+        return self.period_data.get(period, {}).get('duration', 0)
+
+    def set_value(self, period_code, value):
+        self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
+        self.period_data.setdefault(period_code, {})['value'] = value
+
+    def get_value(self, period):
+        return self.period_data.get(period, {}).get('value', 0)
+
+    def btn_set_value_clicked(self, checked, period_code, text, what_set):
+        if what_set == 'value':
+            dlg = SetValueIntegerDialog(self, text, getattr(self, f'get_{what_set}')(period_code))
+        else:
+            dlg = SetValueTimeDialog(self, text, getattr(self, f'get_{what_set}')(period_code))
+
         if dlg.exec():
-            value = dlg.input.text()
-            label_value.setText(value)
-            if what_set == 'duration':
-                self.gcode_auto.set_duration(self.actuator_code, period_code, value)
-            elif what_set == 'value':
-                self.gcode_auto.set_value(self.actuator_code, period_code, value)
+            value = dlg.value
+            getattr(self, f'set_{what_set}')(period_code, value)
+            getattr(self.gcode_auto, f'set_{what_set}')(self.actuator_code, period_code, value)
 
     def build_btn_set_value(self, layout, period_code, text, y, value):
         label_value = QLabel(value)
@@ -241,7 +244,7 @@ class AutoCycleHardWindow(BaseAutoWindow):
         button = QPushButton('✎')
         what_set = 'value' if y else 'duration'
         self.labels_by_period.setdefault(period_code, {})[what_set] = label_value
-        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, label_value, what_set))
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, what_set))
 
         layout.addWidget(QLabel(text), y, 0)
         layout.addWidget(label_value, y, 1)
@@ -250,8 +253,8 @@ class AutoCycleHardWindow(BaseAutoWindow):
     def update(self, checked=None):
         def result_update(data):
             period_code, duration, value = data
-            self.labels_by_period.setdefault(period_code, {})['duration'].setText(str(duration))
-            self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
+            self.set_duration(period_code, duration)
+            self.set_value(period_code, value)
 
         def task_update(period_code):
             return (
@@ -279,6 +282,7 @@ class AutoCycleHardWindow(BaseAutoWindow):
         layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
         self.labels_by_period = {}
+        self.period_data = {}
         self.label_current = None
         self.label_current_mask = 'Прошло {} минуты {} состояния'
 
@@ -303,15 +307,31 @@ class AutoCycleHardWindow(BaseAutoWindow):
 
 
 class AutoCycleSoftWindow(BaseAutoWindow):
+    def set_duration(self, period_code, duration):
+        str_duration = self.format_duration(duration)
+        self.labels_by_period.setdefault(period_code, {})['duration'].setText(str_duration)
+        self.period_data.setdefault(period_code, {})['duration'] = duration
+
+    def get_duration(self, period):
+        return self.period_data.get(period, {}).get('duration', 0)
+
+    def set_value(self, period_code, value):
+        self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
+        self.period_data.setdefault(period_code, {})['value'] = value
+
+    def get_value(self, period):
+        return self.period_data.get(period, {}).get('value', 0)
+
     def btn_set_value_clicked(self, checked, period_code, text, label_value, what_set):
-        dlg = SetValueDialog(self, text, label_value.text())
+        if what_set == 'value':
+            dlg = SetValueIntegerDialog(self, text, int(label_value.text()), maximum=255)
+        else:
+            dlg = SetValueTimeDialog(self, text, getattr(self, f'get_{what_set}')(period_code))
+
         if dlg.exec():
-            value = dlg.input.text()
-            label_value.setText(value)
-            if what_set == 'duration':
-                self.gcode_auto.set_duration(self.actuator_code, period_code, value)
-            elif what_set == 'value':
-                self.gcode_auto.set_value(self.actuator_code, period_code, value)
+            value = dlg.value
+            getattr(self, f'set_{what_set}')(period_code, value)
+            getattr(self.gcode_auto, f'set_{what_set}')(self.actuator_code, period_code, value)
 
     def build_btn_set_value(self, layout, period_code, text, y, value):
         label_value = QLabel(value)
@@ -328,9 +348,9 @@ class AutoCycleSoftWindow(BaseAutoWindow):
     def update(self, checked=None):
         def result_update(data):
             period_code, duration, value = data
-            self.labels_by_period.setdefault(period_code, {})['duration'].setText(str(duration))
+            self.set_duration(period_code, duration)
             if period_code % 2 != 0:
-                self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
+                self.set_value(period_code, value)
 
         def task_update(period_code):
             return (
@@ -361,6 +381,7 @@ class AutoCycleSoftWindow(BaseAutoWindow):
         self.labels_by_period = {}
         self.label_current = None
         self.label_current_mask = 'Прошло {} минуты {}'
+        self.period_data = {}
 
         for period_code, period_text in enumerate(('Рассвет', 'День', 'Закат', 'Ночь')):
             layout_grid = QGridLayout()
@@ -384,12 +405,18 @@ class AutoCycleSoftWindow(BaseAutoWindow):
 
 
 class AutoClimateControlWindow(BaseAutoWindow):
+    def format_value(self, value):
+        sensor = self.gcode.sensors.get(self.sensor_code, '')
+        postfix = sensor.postfix if sensor else ''
+        return f'{value} {postfix}'
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.sensors = {
             self.gcode.s_humid.code: 'Влажность',
             self.gcode.s_temperature.code: 'Температура',
         }
+        self.sensor_code = int(self.actuator_json.get('sensor', -1))
 
         layout = QVBoxLayout()
         layout.addWidget(QLabel(f'Автоматика с автоподстройкой значения для устройства "{self.actuator_name}"'))
@@ -399,7 +426,7 @@ class AutoClimateControlWindow(BaseAutoWindow):
         layout.addLayout(layout_grid)
 
         text = 'Мин. допустимое значение:'
-        self.label_value_min = QLabel(self.actuator_json.get('min', '0'))
+        self.label_value_min = QLabel(self.format_value(self.actuator_json.get('min', 0)))
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, self.label_value_min, 'min'))
         layout_grid.addWidget(QLabel(text), 0, 0)
@@ -407,7 +434,7 @@ class AutoClimateControlWindow(BaseAutoWindow):
         layout_grid.addWidget(button, 0, 2)
 
         text = 'Макс. допустимое значение:'
-        self.label_value_max = QLabel(self.actuator_json.get('max', '0'))
+        self.label_value_max = QLabel(self.format_value(self.actuator_json.get('max', '0')))
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, self.label_value_max, 'max'))
         layout_grid.addWidget(QLabel(text), 1, 0)
@@ -415,7 +442,7 @@ class AutoClimateControlWindow(BaseAutoWindow):
         layout_grid.addWidget(button, 1, 2)
 
         text = 'Датчик:'
-        sensor_code = int(self.actuator_json.get('sensor', -1))
+        sensor_code = self.sensor_code
         self.label_value_sensor = QLabel('Не выбран') if sensor_code == -1 else QLabel(self.sensors[sensor_code])
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, self.label_value_sensor, 'sensor'))
@@ -431,36 +458,39 @@ class AutoClimateControlWindow(BaseAutoWindow):
             self.update()
 
     def btn_set_value_clicked(self, checked, text, label_value, what_set):
-        initial_value = label_value.text()
-        input_widget = None
         if what_set == 'sensor':
-            input_widget = QListWidget()
+            current_sensor_code = -1
             for sensor_code, sensor_name in self.sensors.items():
-                widget_item = QListWidgetItem(sensor_name, input_widget)
-                widget_item.setData(Qt.ItemDataRole.UserRole, sensor_code)
-                if initial_value == sensor_name:
-                    widget_item.setSelected(True)
+                if sensor_name == label_value.text():
+                    current_sensor_code = sensor_code
 
-        dlg = SetValueDialog(self, text, initial_value, input_widget)
+            dlg = SetValueListDialog(self, text, current_sensor_code, self.sensors)
+        else:
+            dlg = SetValueIntegerDialog(self, text, int(label_value.text().split()[0]))
+
         if dlg.exec():
             if what_set == 'min':
-                value = dlg.input.text()
-                label_value.setText(value)
+                value = dlg.value
+                label_value.setText(self.format_value(value))
                 self.gcode_auto.set_min(self.actuator_code, value)
             elif what_set == 'max':
-                value = dlg.input.text()
-                label_value.setText(value)
+                value = dlg.value
+                label_value.setText(self.format_value(value))
                 self.gcode_auto.set_max(self.actuator_code, value)
             elif what_set == 'sensor':
-                value = dlg.input.currentItem()
-                label_value.setText(value.text())
-                self.gcode_auto.set_sensor(self.actuator_code, value.data(Qt.ItemDataRole.UserRole))
+                value = dlg.value
+                label_value.setText(self.sensors[value])
+                self.gcode_auto.set_sensor(self.actuator_code, value)
+                self.sensor_code = value
+                self.label_value_min.setText(self.format_value(self.label_value_min.text().split()[0]))
+                self.label_value_max.setText(self.format_value(self.label_value_max.text().split()[0]))
 
     def update(self, checked=None):
         def result_update(data):
             vmin, vmax, sensor = data
-            self.label_value_min.setText(str(vmin))
-            self.label_value_max.setText(str(vmax))
+            self.sensor_code = sensor
+            self.label_value_min.setText(self.format_value(vmin))
+            self.label_value_max.setText(self.format_value(vmax))
             self.label_value_sensor.setText(self.sensors[sensor])
 
         def task_update():
@@ -500,23 +530,45 @@ class AutoTimerWindow(BaseAutoWindow):
 class TimeWindow(QWidget):
     is_closed = False
 
+    def set_time(self, hours, minutes):
+        self.extern_label_time.setText(f'{hours:02}:{minutes:02}')
+        self.label_time.setText(f'{hours:02}:{minutes:02}')
+        self.hours = hours
+        self.minutes = minutes
+
     def closeEvent(self, *args, **kwargs):
         super().closeEvent(*args, **kwargs)
         self.is_closed = True
 
     def update(self, checked=None):
+
         def result_time(data):
-            self.label_time.setText(f'{data[0]:02}:{data[1]:02}')
-            self.field_hours.setText(str(data[0]))
-            self.field_minutes.setText(str(data[1]))
+            (hours, minutes), source_code = data
+            self.set_time(hours, minutes)
+            self.label_time_source.setText(self.source_times[source_code])
 
         def get_time():
-            return self.gcode.get_time()
+            return self.gcode.get_time(), self.gcode.get_time_source()
 
         self.worker_manager.add_and_start_worker(result_time, get_time)
 
-    def set_time_clicked(self):
-        self.gcode.set_time(int(self.field_hours.text()), int(self.field_minutes.text()))
+    def btn_select_source_time_clicked(self, _):
+        current_source_code = -1
+        for source_code, source_name in self.source_times.items():
+            if source_name == self.label_time_source.text():
+                current_source_code = source_code
+
+        dlg = SetValueListDialog(self, 'Источник времени', current_source_code, self.source_times)
+        if dlg.exec():
+            value = dlg.value
+            self.label_time_source.setText(self.source_times[value])
+            self.gcode.set_time_source(value)
+
+    def btn_set_time_clicked(self, _):
+        dlg = SetValueTimeDialog(self, 'Время', self.hours * 60 + self.minutes)
+        if dlg.exec():
+            self.set_time(dlg.hours, dlg.minutes)
+            self.gcode.set_time(dlg.hours, dlg.minutes)
 
     def __init__(
             self,
@@ -528,30 +580,33 @@ class TimeWindow(QWidget):
             parent=None,
     ):
         super().__init__(parent=parent)
-        self.label_time = label_time
+        self.extern_label_time = label_time
         self.gcode = gcode
         self.open_type = open_type
         self.worker_manager = worker_manager
         self.buff_json = buff_json
-        self.setWindowTitle(f'Настройка автоматики')
+        self.setWindowTitle(f'Настройка времени')
+        self.source_times = {
+            0: 'Процессор', 1: 'Встроенные часы',
+        }
+        self.current_time = 0
 
-        self.field_hours = QLineEdit()
-        self.field_hours.setInputMask(r'09')
-        self.field_minutes = QLineEdit()
-        self.field_minutes.setInputMask(r'09')
+        self.label_time = QLabel('--:--')
+        self.label_time_source = QLabel('-')
 
         layout = QVBoxLayout()
 
         layout_time = QHBoxLayout()
-        layout_time.addWidget(QLabel('Часы:'))
-        layout_time.addWidget(self.field_hours)
-        layout_time.addWidget(QLabel('Минуты:'))
-        layout_time.addWidget(self.field_minutes)
-        btn_set_time = QPushButton('Установить время')
-        btn_set_time.clicked.connect(self.set_time_clicked)
-        layout_time.addWidget(btn_set_time)
+        layout_time.addWidget(self.label_time)
+        button = QPushButton('✎')
+        button.clicked.connect(self.btn_set_time_clicked)
+        layout_time.addWidget(button)
 
         layout_time_source = QHBoxLayout()
+        layout_time_source.addWidget(self.label_time_source)
+        button = QPushButton('✎')
+        button.clicked.connect(self.btn_select_source_time_clicked)
+        layout_time_source.addWidget(button)
 
         layout.addLayout(layout_time)
         layout.addLayout(layout_time_source)
@@ -735,10 +790,10 @@ class MainPanelWindow(QMainWindow):
         return groupbox
 
     def btn_set_value_clicked(self, checked, actuator_code, text, label_value):
-        dlg = SetValueDialog(self, text, label_value.text())
+        dlg = SetValueIntegerDialog(self, text, int(label_value.text()))
         if dlg.exec():
-            value = dlg.input.text()
-            label_value.setText(value)
+            value = dlg.value
+            label_value.setText(str(value))
             self.gcode.actuators[actuator_code].set(value)
 
     def btn_open_auto_clicked(self, checked, gcode_auto, actuator_code: int, actuator_name: str):

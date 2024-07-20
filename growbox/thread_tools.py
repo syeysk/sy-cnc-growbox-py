@@ -1,4 +1,5 @@
 import sys
+import traceback
 
 from PyQt6.QtCore import QRunnable, pyqtSlot, QObject, pyqtSignal, QThreadPool
 
@@ -49,6 +50,7 @@ class SerialWorkersManager:
         except Exception as err:
             print('ERROR in result function:', result_func.__name__)
             print('   ', err)
+            traceback.print_exc()
 
         if self.workers:
             worker = self.workers.pop(0)

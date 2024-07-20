@@ -91,9 +91,10 @@ class Actuator:
 
 
 class Sensor:
-    def __init__(self, code: int, output: WriterInterface):
+    def __init__(self, code: int, output: WriterInterface, postfix):
         self.code = code
         self.output = output
+        self.postfix = postfix
 
     def __str__(self):
         return str(self.code)
@@ -244,8 +245,8 @@ class GrowboxGCodeBuilder:
             self.a_fred_light.code: self.a_fred_light,
         }
 
-        self.s_temperature = Sensor(0, self.output)
-        self.s_humid = Sensor(1, self.output)
+        self.s_temperature = Sensor(0, self.output, '°C')
+        self.s_humid = Sensor(1, self.output, '%')
         self.sensors = {
             self.s_temperature.code: self.s_temperature,
             self.s_humid.code: self.s_humid,
