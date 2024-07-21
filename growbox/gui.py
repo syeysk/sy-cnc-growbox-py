@@ -513,12 +513,77 @@ class AutoTimerWindow(BaseAutoWindow):
 
         self.worker_manager.add_and_start_worker(result_update, task_update)
 
+    def hour_btn_clicked(self, btn):
+        hour = btn.property('hour')
+        is_checked = not btn.property('is_checked')
+        btn.setProperty('is_checked', is_checked)
+        if is_checked:
+            style_sheets = 'QPushButton {background-color: green; color: white;}'
+        else:
+            style_sheets = 'QPushButton {background-color: none; color: none;}'
+
+        btn.setStyleSheet(style_sheets)
+        for minute_btn in self.minute_btns_by_hours[hour]:
+            minute_btn.setStyleSheet(style_sheets)
+            minute_btn.setProperty('is_checked', is_checked)
+
+    def minute_btn_clicked(self, btn):
+        print(btn.property('minute'))
+        is_checked = not btn.property('is_checked')
+        btn.setProperty('is_checked', is_checked)
+        if is_checked:
+            style_sheets = 'QPushButton {background-color: green; color: white;}'
+        else:
+            style_sheets = 'QPushButton {background-color: none; color: none;}'
+
+        btn.setStyleSheet(style_sheets)
+
+    def build_time_buttons(self, hour_start, hours_end):
+        def _hour_btn_clicked(btn):
+            return lambda x: self.hour_btn_clicked(btn)
+
+        def _minute_btn_clicked(btn):
+            return lambda x: self.minute_btn_clicked(btn)
+
+        layout = QVBoxLayout()
+        for hour in range(hour_start, hours_end):
+            hour_layout = QHBoxLayout()
+            hour_button = QPushButton(str(hour))
+            hour_button.setFixedHeight(17 * 6)
+            hour_button.setProperty('hour', hour)
+            hour_button.setProperty('is_checked', False)
+            hour_button.clicked.connect(_hour_btn_clicked(hour_button))
+            hour_layout.addWidget(hour_button)
+
+            minute_layout = QVBoxLayout()
+            for minute in range(0, 4):
+                minute_button = QPushButton(str(minute * 15))
+                minute_button.setFixedHeight(18)
+                minute_button.setProperty('minute', minute)
+                minute_button.setProperty('is_checked', False)
+                minute_button.clicked.connect(_minute_btn_clicked(minute_button))
+                self.minute_btns_by_hours.setdefault(hour, []).append(minute_button)
+                minute_layout.addWidget(minute_button)
+
+            hour_layout.addLayout(minute_layout)
+            layout.addLayout(hour_layout)
+
+        return layout
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         layout = QVBoxLayout()
         layout.addWidget(QLabel(f'Автоматика включения по таймеру для устройства "{self.actuator_name}"'))
         layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
+        self.minute_btns_by_hours = {}
+
+        help_layout = QHBoxLayout()
+        help_layout.addLayout(self.build_time_buttons(0, 6))
+        help_layout.addLayout(self.build_time_buttons(6, 12))
+        help_layout.addLayout(self.build_time_buttons(12, 18))
+        help_layout.addLayout(self.build_time_buttons(18, 24))
+        layout.addLayout(help_layout)
 
         if self.open_type == 'connect':
             button_update = QPushButton('Обновить')
@@ -590,6 +655,8 @@ class TimeWindow(QWidget):
             0: 'Процессор', 1: 'Встроенные часы',
         }
         self.current_time = 0
+        self.hours = 0
+        self.minutes = 0
 
         self.label_time = QLabel('--:--')
         self.label_time_source = QLabel('-')
