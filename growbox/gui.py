@@ -549,23 +549,27 @@ class AutoTimerWindow(BaseAutoWindow):
         for minute_btn in self.minute_btns_by_hours[hour]:
             self.toggle_btn(minute_btn, is_checked)
 
-        hour_byte = self.minutes_bits[hour // 2]
+        mask = 0b1111 << (int(not bool(hour % 2)) * 4)
         if is_checked:
-            self.minutes_bits[hour // 2] = hour_byte | 0b00001111 if hour % 2 else hour_byte | 0b11110000
+            self.minutes_bits[hour // 2] |= mask
         else:
-            self.minutes_bits[hour // 2] = hour_byte & 0b11110000 if hour % 2 else hour_byte & 0b00001111
+            self.minutes_bits[hour // 2] &= ~mask
 
         self.gcode_auto.set_minute_bits(self.actuator_code, hour // 2, self.minutes_bits[hour // 2])
 
     def minute_btn_clicked(self, btn):
-        print(btn.property('minute'))
+        minute = btn.property('minute')
+        hour = btn.property('hour')
         is_checked = not btn.property('is_checked')
         self.toggle_btn(btn, is_checked)
 
-        # hour_byte = self.minutes_bits[hour // 2]
-        # self.minutes_bits[hour // 2] = hour_byte | 0b11110000 if hour % 2 else hour_byte | 0b00001111
-        # self.gcode_auto.set_minute_bits(self.actuator_code, hour // 2, self.minutes_bits[hour // 2])
+        mask = (1 << (3 - minute)) << (int(not bool(hour % 2)) * 4)
+        if is_checked:
+            self.minutes_bits[hour // 2] |= mask
+        else:
+            self.minutes_bits[hour // 2] &= ~mask
 
+        self.gcode_auto.set_minute_bits(self.actuator_code, hour // 2, self.minutes_bits[hour // 2])
 
     def build_time_buttons(self, hour_start, hours_end):
         def _hour_btn_clicked(btn):
@@ -590,6 +594,7 @@ class AutoTimerWindow(BaseAutoWindow):
                 minute_button = QPushButton(str(minute * 15))
                 minute_button.setFixedHeight(18)
                 minute_button.setProperty('minute', minute)
+                minute_button.setProperty('hour', hour)
                 minute_button.setProperty('is_checked', False)
                 minute_button.clicked.connect(_minute_btn_clicked(minute_button))
                 self.minute_btns_by_hours.setdefault(hour, []).append(minute_button)
