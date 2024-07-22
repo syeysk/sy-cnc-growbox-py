@@ -506,37 +506,66 @@ class AutoClimateControlWindow(BaseAutoWindow):
 class AutoTimerWindow(BaseAutoWindow):
     def update(self, checked=None):
         def result_update(data):
-            pass
+            self.minutes_bits = data
+            for hour, minutes_bytes in enumerate(self.minutes_bits):
+                hour *= 2
+                one_hour_minutes = minutes_bytes >> 4
+                has_any_checked = False
+                for bit in range(0, 4):
+                    is_checked = one_hour_minutes >> (3 - bit) & 1
+                    self.toggle_btn(self.minute_btns_by_hours[hour][bit], is_checked)
+                    if not has_any_checked and is_checked:
+                        has_any_checked = True
+                        self.toggle_btn(self.hour_btns[hour], is_checked)
+
+                hour += 1
+                one_hour_minutes = minutes_bytes & 0b00001111
+                has_any_checked = False
+                for bit in range(0, 4):
+                    is_checked = one_hour_minutes >> (3 - bit) & 1
+                    self.toggle_btn(self.minute_btns_by_hours[hour][bit], is_checked)
+                    if not has_any_checked and is_checked:
+                        has_any_checked = True
+                        self.toggle_btn(self.hour_btns[hour], is_checked)
 
         def task_update():
-            pass
+            return self.gcode_auto.get_minute_bits(self.actuator_code)
 
         self.worker_manager.add_and_start_worker(result_update, task_update)
+
+    def toggle_btn(self, btn, is_checked):
+        if is_checked:
+            style_sheets = 'QPushButton {background-color: green; color: white;}'
+        else:
+            style_sheets = 'QPushButton {background-color: none; color: none;}'
+
+        btn.setProperty('is_checked', is_checked)
+        btn.setStyleSheet(style_sheets)
 
     def hour_btn_clicked(self, btn):
         hour = btn.property('hour')
         is_checked = not btn.property('is_checked')
-        btn.setProperty('is_checked', is_checked)
-        if is_checked:
-            style_sheets = 'QPushButton {background-color: green; color: white;}'
-        else:
-            style_sheets = 'QPushButton {background-color: none; color: none;}'
-
-        btn.setStyleSheet(style_sheets)
+        self.toggle_btn(btn, is_checked)
         for minute_btn in self.minute_btns_by_hours[hour]:
-            minute_btn.setStyleSheet(style_sheets)
-            minute_btn.setProperty('is_checked', is_checked)
+            self.toggle_btn(minute_btn, is_checked)
+
+        hour_byte = self.minutes_bits[hour // 2]
+        if is_checked:
+            self.minutes_bits[hour // 2] = hour_byte | 0b00001111 if hour % 2 else hour_byte | 0b11110000
+        else:
+            self.minutes_bits[hour // 2] = hour_byte & 0b11110000 if hour % 2 else hour_byte & 0b00001111
+
+        self.gcode_auto.set_minute_bits(self.actuator_code, hour // 2, self.minutes_bits[hour // 2])
 
     def minute_btn_clicked(self, btn):
         print(btn.property('minute'))
         is_checked = not btn.property('is_checked')
-        btn.setProperty('is_checked', is_checked)
-        if is_checked:
-            style_sheets = 'QPushButton {background-color: green; color: white;}'
-        else:
-            style_sheets = 'QPushButton {background-color: none; color: none;}'
+        self.toggle_btn(btn, is_checked)
 
-        btn.setStyleSheet(style_sheets)
+        # hour_byte = self.minutes_bits[hour // 2]
+        # self.minutes_bits[hour // 2] = hour_byte | 0b11110000 if hour % 2 else hour_byte | 0b00001111
+        # self.gcode_auto.set_minute_bits(self.actuator_code, hour // 2, self.minutes_bits[hour // 2])
+
 
     def build_time_buttons(self, hour_start, hours_end):
         def _hour_btn_clicked(btn):
@@ -553,6 +582,7 @@ class AutoTimerWindow(BaseAutoWindow):
             hour_button.setProperty('hour', hour)
             hour_button.setProperty('is_checked', False)
             hour_button.clicked.connect(_hour_btn_clicked(hour_button))
+            self.hour_btns[hour] = hour_button
             hour_layout.addWidget(hour_button)
 
             minute_layout = QVBoxLayout()
@@ -577,6 +607,8 @@ class AutoTimerWindow(BaseAutoWindow):
         layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
         self.minute_btns_by_hours = {}
+        self.hour_btns = {}
+        self.minutes_bits = []
 
         help_layout = QHBoxLayout()
         help_layout.addLayout(self.build_time_buttons(0, 6))

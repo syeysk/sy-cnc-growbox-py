@@ -24,9 +24,9 @@ class WriterInterface:
         else:
             self.need_wait_answer = need_wait_answer
 
-    def read_until_end(self, count_lines=1, end_byte=b'\n'):
+    def read_until_end(self, count_lines=1, end_byte=b'\n', max_bytes=100):
         received_bytes = []
-        for _ in range(100):
+        for _ in range(max_bytes):
             received_byte = self.output.read(1)
             if not received_byte:
                 break
@@ -40,7 +40,7 @@ class WriterInterface:
 
         return b''.join(received_bytes)
 
-    def write(self, data: str, count_lines_to_receive=1, timeout=None):
+    def write(self, data: str, count_lines_to_receive=1, timeout=None, max_bytes=100):
         if timeout:
             prev_timeout = self.output.timeout
             self.output.timeout = timeout
@@ -58,7 +58,7 @@ class WriterInterface:
 
         self.output.write(data)
         if self.need_wait_answer:
-            answer = self.read_until_end(count_lines_to_receive)  # self.output.read(100)
+            answer = self.read_until_end(count_lines_to_receive, max_bytes=max_bytes)  # self.output.read(100)
             # answer = self.output.read(100)
             if self.callback_answer:
                 self.callback_answer(answer)
@@ -221,6 +221,14 @@ class AutoClimateControl(BaseAuto):
 class AutoTimer(BaseAuto):
     CODE = 3
     DEFAULT_TURN = False
+
+    def get_minute_bits(self, actuator: Actuator | int | str):
+        answer = self.output.write(f'E2511 A{actuator}', 13, max_bytes=123)
+        answer_lines = answer.decode().split('\r\n')
+        return [int(float(line[2:].strip())) for line in answer_lines[:-1]]
+
+    def set_minute_bits(self, actuator: Actuator | int | str, minute_byte: int, byte_value: int):
+        self.output.write(f'E251 A{actuator} B{minute_byte} V{byte_value}')
 
 
 class GrowboxGCodeBuilder:
