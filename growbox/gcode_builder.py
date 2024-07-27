@@ -83,8 +83,10 @@ class Actuator:
     def __str__(self):
         return str(self.code)
 
-    def get(self):
-        return self.output.write(f'E1 A{self.code}')
+    def get(self) -> int:
+        answer = self.output.write(f'E1 A{self.code}', 2)
+        answer_lines = answer.decode().split('\r\n')
+        return int(float(answer_lines[0][2:].strip()))
 
     def set(self, value: int):
         return self.output.write(f'E0 A{self.code} V{value}')
@@ -99,7 +101,7 @@ class Sensor:
     def __str__(self):
         return str(self.code)
 
-    def get(self):
+    def get(self) -> float:
         answer = self.output.write(f'E2 S{self.code}', 2, 2.2)
         answer_lines = answer.decode().split('\r\n')
         value = answer_lines[0][2:].strip()

@@ -893,7 +893,8 @@ class MainPanelWindow(QMainWindow):
 
         return groupbox
 
-    def btn_set_value_clicked(self, checked, actuator_code, text, label_value):
+    def btn_set_value_clicked(self, checked, actuator_code, text):
+        label_value = self.actuator_widgets[actuator_code]
         dlg = SetValueIntegerDialog(self, text, int(label_value.text()))
         if dlg.exec():
             value = dlg.value
@@ -944,9 +945,10 @@ class MainPanelWindow(QMainWindow):
         default_value = self.gcode.actuators[actuator_code].DEFAULT_VALUE
         value = self.buff_json.get('actuators', {}).get(str(actuator_code), {}).get('value', default_value)
         label_value = QLabel(str(value))
+        self.actuator_widgets[actuator_code] = label_value
 
         button = QPushButton('✎')
-        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, actuator_code, text, label_value))
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, actuator_code, text))
 
         layout.addWidget(QLabel(text), y, 0)
         layout.addWidget(label_value, y, 1)
@@ -1065,7 +1067,15 @@ class MainPanelWindow(QMainWindow):
         def get_time():
             return self.gcode.get_time()
 
+        def result_actuators(data):
+            for actuator_code, actuator_widget in self.actuator_widgets.items():
+                actuator_widget.setText(str(data[actuator_code]))
+
+        def get_actuators():
+            return {actuator_code: actuator.get() for actuator_code, actuator in self.gcode.actuators.items()}
+
         self.worker_manager.add_and_start_worker(result_time, get_time)
+        self.worker_manager.add_and_start_worker(result_actuators, get_actuators)
 
         for sensor_code, sensor in self.gcode.sensors.items():
             self.worker_manager.add_and_start_worker(result_sensors, get_sensors, sensor.code)
@@ -1087,6 +1097,7 @@ class MainPanelWindow(QMainWindow):
         self.turn_checkboxes = {}
         self.buff_json = {}
         self.sensor_widgets = {}
+        self.actuator_widgets = {}
         self.worker_manager = SerialWorkersManager(
             print_to_log=self.print_to_log,
             callback_write=self.callback_write,
@@ -1191,7 +1202,7 @@ class SelectSerialPortDialog(QDialog):
             if baudrate == 38400:
                 self.input_baudrate.setCurrentItem(widget_item_baudrate)
 
-        self.input_timeout_read = QLineEdit('2.2')
+        self.input_timeout_read = QLineEdit('0.6')
         self.input_timeout_write = QLineEdit('0.1')
 
         layout_grid = QGridLayout()
