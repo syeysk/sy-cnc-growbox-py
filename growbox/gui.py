@@ -1232,7 +1232,7 @@ class SelectHttpDialog(QDialog):
 
         layout = QVBoxLayout()
 
-        self.input_url = QLineEdit('http://192.168.0.0')
+        self.input_url = QLineEdit('http://192.168.4.1')
 
         layout_grid = QGridLayout()
         layout_grid.addWidget(QLabel('URL подключения:'), 0, 0)

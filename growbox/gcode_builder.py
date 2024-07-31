@@ -41,7 +41,7 @@ class WriterInterface:
         return b''.join(received_bytes)
 
     def write(self, data: str, count_lines_to_receive=1, timeout=None, max_bytes=100):
-        if timeout:
+        if timeout and hasattr(self.output, 'timeout'):
             prev_timeout = self.output.timeout
             self.output.timeout = timeout
 
@@ -63,7 +63,7 @@ class WriterInterface:
             if self.callback_answer:
                 self.callback_answer(answer)
 
-        if timeout:
+        if timeout and hasattr(self.output, 'timeout'):
             self.output.timeout = prev_timeout
 
         return answer

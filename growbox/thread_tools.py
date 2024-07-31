@@ -25,7 +25,7 @@ class Worker(QRunnable):
         try:
             result = self.fn(*self.args, **self.kwargs)
         except Exception:
-            # traceback.print_exc()
+            traceback.print_exc()
             exctype, value = sys.exc_info()[:2]
             self.signals.error.emit((exctype, value))#, traceback.format_exc()))
         else:
@@ -67,6 +67,7 @@ class SerialWorkersManager:
             except Exception as err:
                 print('ERROR in task function:', task_func.__name__)
                 print('   ', err)
+                traceback.print_exc()
 
         worker = Worker(safe_task_func, *args, **kwargs)
         worker.signals.result.connect(lambda any_data: self.run_next_worker(any_data, result_func))
