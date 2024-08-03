@@ -138,19 +138,23 @@ def generate_gcode(gcode: GrowboxGCodeBuilder, profile_data: dict, grow_mode: in
 
 
 class HttpAdapter:
-    def __init__(self, url):
+    def __init__(self, url, timeout_read: int, timeout_write):
         self.url = url
         self.mode = 'w'
         self.response_data = ''
+        self.timeout_read = int(timeout_read)
+        self.timeout_write = timeout_write
 
     def write(self, row_string):
-        params = {'action': 'send_to_serial', 'string_data': row_string, 'timeout_read': 2500}
+        params = {'action': 'send_to_serial', 'string_data': row_string, 'timeout_read': self.timeout_read}
         try:
-            response = requests.post(f'{self.url}/api.c', params=params, timeout=4)
+            response = requests.post(f'{self.url}/api.c', params=params, timeout=self.timeout_write)
         except requests.ReadTimeout as error:
             print('read:', str(error), 'gcode:', row_string)
         except requests.ConnectTimeout as error:
-            print('connect:', str(error), 'gcode:', row_string)
+            print('connect timeout:', str(error), 'gcode:', row_string)
+        except requests.ConnectionError as error:
+            print('connect error:', str(error), 'gcode:', row_string)
         else:
             if response.status_code == 200:
                 string_response_data = response.json()['data']['string_response_data']
@@ -783,8 +787,8 @@ class GCodeSendWindow(QWidget):
 class MainPanelWindow(QMainWindow):
     def closeEvent(self, *args, **kwargs):
         super().closeEvent(*args, **kwargs)
-        if self.serial:
-            self.serial.close()
+        for obj in self.objects_to_close:
+            obj.close()
 
     def btn_save_gcode(self, checked):
         default_file_name = self.file_path.stem if self.file_path else ''
@@ -957,9 +961,9 @@ class MainPanelWindow(QMainWindow):
     def build_groupbox_actuators(self):
         layout = QGridLayout()
         self.build_btn_set_value(layout, self.gcode.A_WHITE_LIGHT, 'Белый свет:', 0)
-        self.build_btn_set_value(layout, self.gcode.A_FRED_LIGHT, 'Дальний красный:', 1)
-        self.build_btn_set_value(layout, self.gcode.A_EXTRACTOR, 'Вытяжка:', 2)
-        self.build_btn_set_value(layout, self.gcode.A_HUMID, 'Увлажнитель:', 3)
+        #self.build_btn_set_value(layout, self.gcode.A_FRED_LIGHT, 'Дальний красный:', 1)
+        self.build_btn_set_value(layout, self.gcode.A_EXTRACTOR, 'Вытяжка:', 1)
+        self.build_btn_set_value(layout, self.gcode.A_HUMID, 'Увлажнитель:', 2)
         groupbox = QGroupBox('Исполнительные устройства')
         groupbox.setLayout(layout)
         return groupbox
@@ -999,7 +1003,7 @@ class MainPanelWindow(QMainWindow):
 
         actuators = [
             ('Белый свет', self.gcode.A_WHITE_LIGHT),
-            ('Дальний красный', self.gcode.A_FRED_LIGHT),
+            #('Дальний красный', self.gcode.A_FRED_LIGHT),
             ('Вытяжка', self.gcode.A_EXTRACTOR),
             ('Увлажнитель', self.gcode.A_HUMID),
         ]
@@ -1041,7 +1045,7 @@ class MainPanelWindow(QMainWindow):
             self.print_to_log(gcode_line)
             self.apply_gcode_to_gui(gcode_line)
 
-    def worker_update_from_serial(self):
+    def worker_update_from_growbox(self):
         def result_autos(data):
             auto_code, actuator_code, is_turned = data
             self.buff_json.setdefault(auto_code, {}).setdefault(actuator_code, {})['turn'] = is_turned
@@ -1059,7 +1063,10 @@ class MainPanelWindow(QMainWindow):
                 self.sensor_widgets[int(sensor_code)].setText(str(value))
 
         def get_sensors(sensor_code):
-            return sensor_code, self.gcode.sensors[int(sensor_code)].get()
+            data = sensor_code, self.gcode.sensors[int(sensor_code)].get()
+            import time
+            time.sleep(2)
+            return data
 
         def result_time(data):
             self.label_time.setText(f'{data[0]:02}:{data[1]:02}')
@@ -1091,7 +1098,7 @@ class MainPanelWindow(QMainWindow):
             data: dict | None = None,
     ):
         super().__init__()
-        self.serial = None
+        self.objects_to_close = []
         self.progress_bar = None
         self.auto_windows = {}
         self.turn_checkboxes = {}
@@ -1114,7 +1121,7 @@ class MainPanelWindow(QMainWindow):
             with file_path.open() as json_file:
                 self.buff_json = json.load(json_file)
                 self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
-        if open_type == 'open' and open_subtype == 'gcode':
+        elif open_type == 'open' and open_subtype == 'gcode':
             self.print_to_status_bar(str(file_path), 1)
             self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
             with file_path.open() as gcode_file:
@@ -1125,20 +1132,21 @@ class MainPanelWindow(QMainWindow):
             self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
         elif open_type == 'connect' and open_subtype == 'serial':
             self.print_to_status_bar(str(file_path), 1)
-            self.serial = serial.Serial(
+            serial_adapter = serial.Serial(
                 str(file_path),
                 baudrate=data['baudrate'],
                 timeout=data['timeout_read'],
                 write_timeout=data['timeout_write'],
             )
             self.gcode = GrowboxGCodeBuilder(
-                self.serial,
+                serial_adapter,
                 callback_answer=lambda s: self.print_to_log(s, True),
                 callback_write=lambda s: self.callback_write(s, True),
             )
+            self.objects_to_close.append(serial_adapter)
         elif open_type == 'connect' and open_subtype == 'http':
             self.print_to_status_bar(data['url'], 1)
-            http_adapter = HttpAdapter(data['url'])
+            http_adapter = HttpAdapter(data['url'], timeout_read=2500, timeout_write=10)  # timeout_read - only integer, not float
             self.gcode = GrowboxGCodeBuilder(
                 http_adapter,
                 callback_answer=lambda s: self.print_to_log(s, True),
@@ -1170,10 +1178,12 @@ class MainPanelWindow(QMainWindow):
         if open_type == 'connect':
             # layout.addWidget(QLabel('Секунд с момента включения:'))
             button_update = QPushButton('Обновить показания')
-            button_update.clicked.connect(lambda s: self.worker_update_from_serial())
+            button_update.clicked.connect(lambda s: self.worker_update_from_growbox())
             layout.addWidget(button_update)
-            self.worker_manager.add_and_start_worker(None, self.gcode.output.write, '')
-            self.worker_update_from_serial()
+            if open_subtype == 'serial':
+                self.worker_manager.add_and_start_worker(None, self.gcode.output.write, '')
+
+            self.worker_update_from_growbox()
 
 
 class SelectSerialPortDialog(QDialog):

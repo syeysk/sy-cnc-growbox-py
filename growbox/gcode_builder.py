@@ -247,12 +247,12 @@ class GrowboxGCodeBuilder:
         self.a_humid = Actuator(self.A_HUMID, self.output)
         self.a_extractor = Actuator(self.A_EXTRACTOR, self.output)
         self.a_white_light = Actuator(self.A_WHITE_LIGHT, self.output)
-        self.a_fred_light = Actuator(self.A_FRED_LIGHT, self.output)
+        #self.a_fred_light = Actuator(self.A_FRED_LIGHT, self.output)
         self.actuators = {
             self.a_humid.code: self.a_humid,
             self.a_extractor.code: self.a_extractor,
             self.a_white_light.code: self.a_white_light,
-            self.a_fred_light.code: self.a_fred_light,
+            #self.a_fred_light.code: self.a_fred_light,
         }
 
         self.s_temperature = Sensor(0, self.output, '°C')
