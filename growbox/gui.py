@@ -1064,8 +1064,6 @@ class MainPanelWindow(QMainWindow):
 
         def get_sensors(sensor_code):
             data = sensor_code, self.gcode.sensors[int(sensor_code)].get()
-            import time
-            time.sleep(2)
             return data
 
         def result_time(data):
