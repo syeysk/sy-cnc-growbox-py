@@ -508,34 +508,8 @@ class AutoClimateControlWindow(BaseAutoWindow):
 
 
 class AutoTimerWindow(BaseAutoWindow):
-    def update(self, checked=None):
-        def result_update(data):
-            self.minutes_bits = data
-            for hour, minutes_bytes in enumerate(self.minutes_bits):
-                hour *= 2
-                one_hour_minutes = minutes_bytes >> 4
-                has_any_checked = False
-                for bit in range(0, 4):
-                    is_checked = one_hour_minutes >> (3 - bit) & 1
-                    self.toggle_btn(self.minute_btns_by_hours[hour][bit], is_checked)
-                    if not has_any_checked and is_checked:
-                        has_any_checked = True
-                        self.toggle_btn(self.hour_btns[hour], is_checked)
-
-                hour += 1
-                one_hour_minutes = minutes_bytes & 0b00001111
-                has_any_checked = False
-                for bit in range(0, 4):
-                    is_checked = one_hour_minutes >> (3 - bit) & 1
-                    self.toggle_btn(self.minute_btns_by_hours[hour][bit], is_checked)
-                    if not has_any_checked and is_checked:
-                        has_any_checked = True
-                        self.toggle_btn(self.hour_btns[hour], is_checked)
-
-        def task_update():
-            return self.gcode_auto.get_minute_bits(self.actuator_code)
-
-        self.worker_manager.add_and_start_worker(result_update, task_update)
+    PARTS_PER_HOUR = 4  # COUNT_PARTS_PER_HOUR
+    MINUTE_DIVISION_PRICE = 60 / PARTS_PER_HOUR
 
     def toggle_btn(self, btn, is_checked):
         if is_checked:
@@ -546,6 +520,48 @@ class AutoTimerWindow(BaseAutoWindow):
         btn.setProperty('is_checked', is_checked)
         btn.setStyleSheet(style_sheets)
 
+    def set_cells(self, hour_index: int, minutes_are_checked: list):
+        count_checked_minutes = 0
+        for minute_index, is_checked in enumerate(minutes_are_checked):
+            self.toggle_btn(self.minute_btns_by_hours[hour_index][minute_index], is_checked)
+            count_checked_minutes += int(is_checked)
+
+        if count_checked_minutes == 4:
+            self.toggle_btn(self.hour_btns[hour_index], True)
+
+    def get_index_byte(self, hour_index: int, minute_index: int):
+        index_bit = self.PARTS_PER_HOUR * hour_index + minute_index
+        return index_bit // 8
+
+    def get_bit(self, hour_index: int, minute_index: int):
+        index_bit = self.PARTS_PER_HOUR * hour_index + minute_index
+        index_byte = index_bit // 8
+        index_bit_inside_byte = index_bit % 8
+        return self.minutes_bits[index_byte] >> (7 - index_bit_inside_byte) & 1
+
+    def set_bit(self, hour_index: int, minute_index: int, is_checked):
+        index_bit = self.PARTS_PER_HOUR * hour_index + minute_index
+        index_byte = index_bit // 8
+        index_bit_inside_byte = index_bit % 8
+        if is_checked:
+            self.minutes_bits[index_byte] |= 128 >> index_bit_inside_byte
+        else:
+            self.minutes_bits[index_byte] &= ~(128 >> index_bit_inside_byte)
+
+    def update(self, checked=None):
+        def result_update(data):
+            self.minutes_bits = data
+            for hour_index in range(0, 24):
+                are_checked = [
+                    self.get_bit(hour_index, minute_index) for minute_index in range(0, self.PARTS_PER_HOUR)
+                ]
+                self.set_cells(hour_index, are_checked)
+
+        def task_update():
+            return self.gcode_auto.get_minute_bits(self.actuator_code)
+
+        self.worker_manager.add_and_start_worker(result_update, task_update)
+
     def hour_btn_clicked(self, btn):
         hour = btn.property('hour')
         is_checked = not btn.property('is_checked')
@@ -553,13 +569,11 @@ class AutoTimerWindow(BaseAutoWindow):
         for minute_btn in self.minute_btns_by_hours[hour]:
             self.toggle_btn(minute_btn, is_checked)
 
-        mask = 0b1111 << (int(not bool(hour % 2)) * 4)
-        if is_checked:
-            self.minutes_bits[hour // 2] |= mask
-        else:
-            self.minutes_bits[hour // 2] &= ~mask
+        for minute_index in range(0, self.PARTS_PER_HOUR):
+            self.set_bit(hour, minute_index, is_checked)
 
-        self.gcode_auto.set_minute_bits(self.actuator_code, hour // 2, self.minutes_bits[hour // 2])
+        for index_byte in {self.get_index_byte(hour, minute_index) for minute_index in range(0, self.PARTS_PER_HOUR)}:
+            self.gcode_auto.set_minute_bits(self.actuator_code, index_byte, self.minutes_bits[index_byte])
 
     def minute_btn_clicked(self, btn):
         minute = btn.property('minute')
@@ -567,13 +581,12 @@ class AutoTimerWindow(BaseAutoWindow):
         is_checked = not btn.property('is_checked')
         self.toggle_btn(btn, is_checked)
 
-        mask = (1 << (3 - minute)) << (int(not bool(hour % 2)) * 4)
-        if is_checked:
-            self.minutes_bits[hour // 2] |= mask
-        else:
-            self.minutes_bits[hour // 2] &= ~mask
+        self.set_bit(hour, minute, int(is_checked))
+        index_byte = self.get_index_byte(hour, minute)
+        self.gcode_auto.set_minute_bits(self.actuator_code, index_byte, self.minutes_bits[index_byte])
 
-        self.gcode_auto.set_minute_bits(self.actuator_code, hour // 2, self.minutes_bits[hour // 2])
+        count_checked = sum(self.get_bit(hour, minute_index) for minute_index in range(0, self.PARTS_PER_HOUR))
+        self.toggle_btn(self.hour_btns[hour], count_checked == self.PARTS_PER_HOUR)
 
     def build_time_buttons(self, hour_start, hours_end):
         def _hour_btn_clicked(btn):
@@ -594,8 +607,8 @@ class AutoTimerWindow(BaseAutoWindow):
             hour_layout.addWidget(hour_button)
 
             minute_layout = QVBoxLayout()
-            for minute in range(0, 4):
-                minute_button = QPushButton(str(minute * 15))
+            for minute in range(0, self.PARTS_PER_HOUR):
+                minute_button = QPushButton(str(minute * self.MINUTE_DIVISION_PRICE))
                 minute_button.setFixedHeight(18)
                 minute_button.setProperty('minute', minute)
                 minute_button.setProperty('hour', hour)
