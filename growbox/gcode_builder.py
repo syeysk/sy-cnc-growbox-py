@@ -13,6 +13,16 @@ import serial
 #
 #     return dec2
 
+def parse_answer(answer):
+    answer_lines = answer.decode().strip().split('\r\n')[:-1]
+    values = []
+    for line in answer_lines:
+        value = line[2:].strip()
+        value = None if value.upper() == 'NAN' else float(value)
+        values.append((line[1], value))
+
+    return values
+
 
 class WriterInterface:
     def __init__(self, output, need_wait_answer: bool | None = None, callback_answer=None, callback_write=None):
@@ -24,7 +34,7 @@ class WriterInterface:
         else:
             self.need_wait_answer = need_wait_answer
 
-    def read_until_end(self, count_lines=1, end_byte=b'\n', max_bytes=100):
+    def _read_until_end(self, count_lines=1, end_byte=b'\n', max_bytes=100):
         received_bytes = []
         for _ in range(max_bytes):
             received_byte = self.output.read(1)
@@ -58,7 +68,7 @@ class WriterInterface:
 
         self.output.write(data)
         if self.need_wait_answer:
-            answer = self.read_until_end(count_lines_to_receive, max_bytes=max_bytes)  # self.output.read(100)
+            answer = self._read_until_end(count_lines_to_receive, max_bytes=max_bytes)  # self.output.read(100)
             # answer = self.output.read(100)
             if self.callback_answer:
                 self.callback_answer(answer)
@@ -67,6 +77,10 @@ class WriterInterface:
             self.output.timeout = prev_timeout
 
         return answer
+
+    def write_and_parse(self, *args, **kwargs):
+        answer = self.write(*args, **kwargs)
+        return parse_answer(answer)
 
     # def write2(self, command: str, **kwargs):
     #     args = ' '.join([f'{k.upper()}{v}' for k, v in kwargs.items])
@@ -84,9 +98,8 @@ class Actuator:
         return str(self.code)
 
     def get(self) -> int:
-        answer = self.output.write(f'E1 A{self.code}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:].strip()))
+        answer_lines = self.output.write_and_parse(f'E1 A{self.code}', 2)
+        return int(answer_lines[0][1])
 
     def set(self, value: int):
         return self.output.write(f'E0 A{self.code} V{value}')
@@ -102,10 +115,8 @@ class Sensor:
         return str(self.code)
 
     def get(self) -> float:
-        answer = self.output.write(f'E2 S{self.code}', 2, 2.2)
-        answer_lines = answer.decode().split('\r\n')
-        value = answer_lines[0][2:].strip()
-        return None if value.upper() == 'NAN' else float(value)
+        answer_lines = self.output.write_and_parse(f'E2 S{self.code}', 2, 2.2)
+        return answer_lines[0][1]
 
 
 class BaseAuto:
@@ -118,9 +129,8 @@ class BaseAuto:
         return self.output.write(f'E3 R{self.CODE} A{actuator} B{int(status)}')
 
     def is_turn(self, actuator: Actuator | int | str) -> bool:
-        answer = self.output.write(f'E4 R{self.CODE} A{actuator}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return bool(float(answer_lines[0][2:]))
+        answer_lines = self.output.write_and_parse(f'E4 R{self.CODE} A{actuator}', 2)
+        return bool(answer_lines[0][1])
 
 
 class AutoCycleHard(BaseAuto):
@@ -134,25 +144,22 @@ class AutoCycleHard(BaseAuto):
     PERIODS = [DAY, NIGHT]
 
     def get_current(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E102 A{actuator}', 3)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:])), int(float(answer_lines[1][2:]))
+        answer_lines = self.output.write_and_parse(f'E102 A{actuator}', 3)
+        return int(answer_lines[0][1]), int(answer_lines[1][1])
 
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E101 A{actuator} B{period} D{duration}')
 
     def get_duration(self, actuator: Actuator | int | str, period: int):
-        answer = self.output.write(f'E1011 A{actuator} B{period}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:]))
+        answer_lines = self.output.write_and_parse(f'E1011 A{actuator} B{period}', 2)
+        return int(answer_lines[0][1])
 
     def set_value(self, actuator: Actuator | int | str, period: int, value: int):
         return self.output.write(f'E103 A{actuator} B{period} V{value}')
 
     def get_value(self, actuator: Actuator | int | str, period: int):
-        answer = self.output.write(f'E1031 A{actuator} B{period}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:]))
+        answer_lines = self.output.write_and_parse(f'E1031 A{actuator} B{period}', 2)
+        return int(answer_lines[0][1])
 
 
 class AutoCycleSoft(BaseAuto):
@@ -168,25 +175,22 @@ class AutoCycleSoft(BaseAuto):
     PERIODS = [SUNRISE, DAY, SUNSET, NIGHT]
 
     def get_current(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E152 A{actuator}', 3)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:])), int(float(answer_lines[1][2:]))
+        answer_lines = self.output.write_and_parse(f'E152 A{actuator}', 3)
+        return int(answer_lines[0][1]), int(answer_lines[1][1])
 
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
         return self.output.write(f'E151 A{actuator} P{period} D{duration}')
 
     def get_duration(self, actuator: Actuator | int | str, period: int):
-        answer = self.output.write(f'E1511 A{actuator} P{period}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:]))
+        answer_lines = self.output.write_and_parse(f'E1511 A{actuator} P{period}', 2)
+        return int(answer_lines[0][1])
 
     def set_value(self, actuator: Actuator | int | str, period: int, value: int):
         return self.output.write(f'E153 A{actuator} P{period} V{value}')
 
     def get_value(self, actuator: Actuator | int | str, period: int):
-        answer = self.output.write(f'E1531 A{actuator} P{period}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:]))
+        answer_lines = self.output.write_and_parse(f'E1531 A{actuator} P{period}', 2)
+        return int(answer_lines[0][1])
 
 
 class AutoClimateControl(BaseAuto):
@@ -199,25 +203,22 @@ class AutoClimateControl(BaseAuto):
         return self.output.write(f'E202 A{actuator} V{value}')
 
     def get_min(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E2021 A{actuator}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:]))
+        answer_lines = self.output.write_and_parse(f'E2021 A{actuator}', 2)
+        return int(answer_lines[0][1])
 
     def set_max(self, actuator: Actuator | int | str, value: int):
         return self.output.write(f'E203 A{actuator} V{value}')
 
     def get_max(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E2031 A{actuator}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:]))
+        answer_lines = self.output.write_and_parse(f'E2031 A{actuator}', 2)
+        return int(answer_lines[0][1])
 
     def set_sensor(self, actuator: Actuator | int | str, sensor: Sensor | int | str):
         return self.output.write(f'E201 A{actuator} S{sensor}')
 
     def get_sensor(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E2011 A{actuator}', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:]))
+        answer_lines = self.output.write_and_parse(f'E2011 A{actuator}', 2)
+        return int(answer_lines[0][1])
 
 
 class AutoTimer(BaseAuto):
@@ -225,9 +226,8 @@ class AutoTimer(BaseAuto):
     DEFAULT_TURN = False
 
     def get_minute_bits(self, actuator: Actuator | int | str):
-        answer = self.output.write(f'E2511 A{actuator}', 13, max_bytes=123)
-        answer_lines = answer.decode().split('\r\n')
-        return [int(float(line[2:].strip())) for line in answer_lines[:-1]]
+        answer_lines = self.output.write_and_parse(f'E2511 A{actuator}', 13, max_bytes=123)
+        return [int(line[1]) for line in answer_lines]
 
     def set_minute_bits(self, actuator: Actuator | int | str, minute_byte: int, byte_value: int):
         self.output.write(f'E251 A{actuator} B{minute_byte} V{byte_value}')
@@ -280,17 +280,15 @@ class GrowboxGCodeBuilder:
         return self.output.write('E3')
 
     def get_time(self):
-        answer = self.output.write('E81', 3)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:])), int(float(answer_lines[1][2:]))
+        answer_lines = self.output.write_and_parse('E81', 3)
+        return int(answer_lines[0][1]), int(answer_lines[1][1])
 
     def set_time(self, hours, minutes):
         return self.output.write(f'E8 H{hours} M{minutes}')
 
     def get_time_source(self):
-        answer = self.output.write('E91', 2)
-        answer_lines = answer.decode().split('\r\n')
-        return int(float(answer_lines[0][2:]))
+        answer_lines = self.output.write_and_parse('E91', 2)
+        return int(answer_lines[0][1])
 
     def set_time_source(self, source_code):
         return self.output.write(f'E9 T{source_code}')
