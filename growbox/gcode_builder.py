@@ -3,6 +3,8 @@ import sys
 
 import serial
 
+from gcode_parser import parse_answer
+
 # commands = {}
 
 
@@ -12,16 +14,6 @@ import serial
 #         return function
 #
 #     return dec2
-
-def parse_answer(answer):
-    answer_lines = answer.decode().strip().split('\r\n')[:-1]
-    values = []
-    for line in answer_lines:
-        value = line[2:].strip()
-        value = None if value.upper() == 'NAN' else float(value)
-        values.append((line[1], value))
-
-    return values
 
 
 class WriterInterface:
@@ -240,9 +232,18 @@ class GrowboxGCodeBuilder:
     A_FRED_LIGHT = 3
 
     def __init__(
-            self, output: io.TextIOWrapper | serial.Serial = sys.stdout, callback_answer=None, callback_write=None,
+            self,
+            output: io.TextIOWrapper | serial.Serial = sys.stdout,
+            callback_answer=None,
+            callback_write=None,
+            need_wait_answer=True,
     ):
-        self.output = WriterInterface(output, callback_answer=callback_answer, callback_write=callback_write)
+        self.output = WriterInterface(
+            output,
+            callback_answer=callback_answer,
+            callback_write=callback_write,
+            need_wait_answer=need_wait_answer,
+        )
 
         self.a_humid = Actuator(self.A_HUMID, self.output)
         self.a_extractor = Actuator(self.A_EXTRACTOR, self.output)

@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from serial.tools.list_ports import comports
 
 from gcode_builder import GrowboxGCodeBuilder, AutoCycleHard, AutoCycleSoft, AutoClimateControl, AutoTimer
-from gcode_parser import parse_gcode_line
+from gcode_parser import MachineBase
 from thread_tools import SerialWorkersManager
 from set_value_windows import SetValueIntegerDialog, SetValueListDialog, SetValueTimeDialog
 
@@ -29,38 +29,124 @@ DAY_NEUTRAL = 3
 VEGETATIVE_GROWING = 1
 GENERATIVE_GROWING = 2
 
-def parse_and_bufferize_gcode_line(buff_json, gcode_line):
-    gcode = parse_gcode_line(gcode_line)
-    # from gcode_builder import commands
-    # descr = commands.get(gcode.command)
-    # if descr:
-    #     function, kwargs_descr = descr
-    #     buf_temp = buff_json.setdefault(function, {})
-    #     for name_gcode, name_python in list(kwargs_descr.items())[:1]:
-    #         buf_temp = buf_temp.setdefault(str(gcode.params[name_gcode]), {})
-    #
-    #     if kwargs_descr:
-    #         name_gcode, name_python = list(kwargs_descr.items())[-1]
-    #         buf_temp[name_python] = gcode.params[name_gcode]
 
-    if gcode.command == 'E0':
-        buff_json.setdefault('actuators', {}).setdefault(str(gcode['A']), {})['value'] = gcode['V']
-    elif gcode.command == 'E3' and 'R' in gcode and 'A' in gcode:
-        buff_json.setdefault(str(gcode['R']), {}).setdefault(str(gcode['A']), {})['turn'] = gcode['B']
-    elif gcode.command == 'E101':
-        buff_json.setdefault(str(AutoCycleHard.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['B']), {})['duration'] = str(gcode['D'])
-    elif gcode.command == 'E103':
-        buff_json.setdefault(str(AutoCycleHard.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['B']), {})['value'] = str(gcode['V'])
-    elif gcode.command == 'E151':
-        buff_json.setdefault(str(AutoCycleSoft.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['P']), {})['duration'] = str(gcode['D'])
-    elif gcode.command == 'E153':
-        buff_json.setdefault(str(AutoCycleSoft.CODE), {}).setdefault(str(gcode['A']), {}).setdefault(str(gcode['P']), {})['value'] = str(gcode['V'])
-    elif gcode.command == 'E201':
-        buff_json.setdefault(str(AutoClimateControl.CODE), {}).setdefault(str(gcode['A']), {})['sensor'] = gcode['S']
-    elif gcode.command == 'E202':
-        buff_json.setdefault(str(AutoClimateControl.CODE), {}).setdefault(str(gcode['A']), {})['min'] = str(gcode['V'])
-    elif gcode.command == 'E203':
-        buff_json.setdefault(str(AutoClimateControl.CODE), {}).setdefault(str(gcode['A']), {})['max'] = str(gcode['V'])
+class GrowboxEmulator(MachineBase):
+    def __init__(self, buff_json):
+        super().__init__()
+        self.buff = buff_json
+        self.a_cycle_hard = self.buff.setdefault(str(AutoCycleHard.CODE), {})
+        self.a_cycle_soft = self.buff.setdefault(str(AutoCycleSoft.CODE), {})
+        self.a_climate_control = self.buff.setdefault(str(AutoClimateControl.CODE), {})
+        self.a_timer = self.buff.setdefault(str(AutoTimer.CODE), {})
+        self.time = self.buff.setdefault('time', {})
+
+    ## Датчики и исполнительные устройства, общие команды
+
+    def e0(self, g):
+        self.buff.setdefault('actuators', {}).setdefault(str(g['A']), {})['value'] = g['V']
+
+    def e1(self, g):
+        pass
+
+    def e2(self, g):
+        pass
+
+    def e3(self, g):
+        if 'R' in g and 'A' in g:
+            self.buff.setdefault(str(g['R']), {}).setdefault(str(g['A']), {})['turn'] = g['B']
+
+    def e4(self, g):
+        pass
+
+    ## Время
+
+    def e8(self, g):
+        self.time['time'] = (g['H'], g['M'])
+
+    def e81(self, g):
+        pass
+
+    def e9(self, g):
+        self.time['source'] = g['T']
+
+    def e91(self, g):
+        pass
+
+    ## Циклическая автоматика с резким переключением периода
+
+    def e101(self, g):
+        self.a_cycle_hard.setdefault(str(g['A']), {}).setdefault(str(g['B']), {})['duration'] = str(g['D'])
+
+    def e1011(self, g):
+        pass
+
+    def e102(self, g):
+        pass
+
+    def e103(self, g):
+        self.a_cycle_hard.setdefault(str(g['A']), {}).setdefault(str(g['B']), {})['value'] = str(g['V'])
+
+    def e1031(self, g):
+        pass
+
+    ## Циклическая автоматика с плавной сменой периода
+
+    def e151(self, g):
+        self.a_cycle_soft.setdefault(str(g['A']), {}).setdefault(str(g['P']), {})['duration'] = str(g['D'])
+
+    def e1511(self, g):
+        pass
+
+    def e152(self, g):
+        pass
+
+    def e153(self, g):
+        self.a_cycle_soft.setdefault(str(g['A']), {}).setdefault(str(g['P']), {})['value'] = str(g['V'])
+
+    def e1531(self, g):
+        pass
+
+    ## Условная автоматика климат-контроля
+
+    def e201(self, g):
+        self.a_climate_control.setdefault(str(g['A']), {})['sensor'] = g['S']
+
+    def e2011(self, g):
+        pass
+
+    def e202(self, g):
+        self.a_climate_control.setdefault(str(g['A']), {})['min'] = str(g['V'])
+
+    def e2021(self, g):
+        pass
+
+    def e203(self, g):
+        self.a_climate_control.setdefault(str(g['A']), {})['max'] = str(g['V'])
+
+    def e2031(self, g):
+        pass
+
+    ## Автоматика по таймеру
+
+    def e251(self, g):
+        self.a_timer.setdefault(str(g['A']), {})[str(g['B'])] = str(g['V'])
+
+    def e2511(self, g):
+        pass
+
+#     gcode = parse_gcode_line(gcode_line)
+#     # from gcode_builder import commands
+#     # descr = commands.get(gcode.command)
+#     # if descr:
+#     #     function, kwargs_descr = descr
+#     #     buf_temp = buff_json.setdefault(function, {})
+#     #     for name_gcode, name_python in list(kwargs_descr.items())[:1]:
+#     #         buf_temp = buf_temp.setdefault(str(gcode.params[name_gcode]), {})
+#     #
+#     #     if kwargs_descr:
+#     #         name_gcode, name_python = list(kwargs_descr.items())[-1]
+#     #         buf_temp[name_python] = gcode.params[name_gcode]
+#
 
 
 def buff2gcode(buff_json, gcode):
@@ -817,7 +903,7 @@ class MainPanelWindow(QMainWindow):
         #         return
         if file_path:
             with open(file_path, 'w') as output_file:
-                buff2gcode(self.buff_json, GrowboxGCodeBuilder(output_file))
+                buff2gcode(self.buff_json, GrowboxGCodeBuilder(output_file, need_wait_answer=False))
 
             if not self.file_path:
                 self.file_path = Path(file_path)
@@ -860,7 +946,7 @@ class MainPanelWindow(QMainWindow):
             menu_file.addAction(button_action_send_gcode)
 
     def apply_gcode_to_gui(self, gcode_line):
-        parse_and_bufferize_gcode_line(self.buff_json, gcode_line)
+        self.growbox_emulator.execute(gcode_line)
 
     def open_time_window_clicked(self, checked):
         if self.window_time is None or self.window_time.is_closed:
@@ -1114,6 +1200,7 @@ class MainPanelWindow(QMainWindow):
         self.auto_windows = {}
         self.turn_checkboxes = {}
         self.buff_json = {}
+        self.growbox_emulator = GrowboxEmulator(self.buff_json)
         self.sensor_widgets = {}
         self.actuator_widgets = {}
         self.worker_manager = SerialWorkersManager(
@@ -1131,16 +1218,16 @@ class MainPanelWindow(QMainWindow):
             self.print_to_status_bar(str(file_path), 1)
             with file_path.open() as json_file:
                 self.buff_json = json.load(json_file)
-                self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
+                self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write, need_wait_answer=False)
         elif open_type == 'open' and open_subtype == 'gcode':
             self.print_to_status_bar(str(file_path), 1)
-            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
+            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write, need_wait_answer=False)
             with file_path.open() as gcode_file:
                 for gcode_line in gcode_file:
                     self.apply_gcode_to_gui(gcode_line)
         elif open_type == 'create':
             self.print_to_status_bar('Новый файл', 1)
-            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
+            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write, need_wait_answer=False)
         elif open_type == 'connect' and open_subtype == 'serial':
             self.print_to_status_bar(str(file_path), 1)
             serial_adapter = serial.Serial(
@@ -1317,7 +1404,11 @@ class PlantProfileWindow(QMainWindow):
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение G-код', default_file_name, '*.gcode')
         if file_path:
             with open(file_path, 'w') as output_file:
-                generate_gcode(GrowboxGCodeBuilder(output=output_file), profile_data, self.grow_mode)
+                generate_gcode(
+                    GrowboxGCodeBuilder(output=output_file, need_wait_answer=False),
+                    profile_data,
+                    self.grow_mode,
+                )
 
             if not self.file_path:
                 self.file_path = Path(file_path)

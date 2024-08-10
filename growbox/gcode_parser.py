@@ -26,3 +26,41 @@ def parse_gcode_line(gcode_line):
         gcode_line.params[part[0].upper()] = int(part[1:])
 
     return gcode_line
+
+
+class MachineBase:
+    def __init__(self):
+        self.answer = ''
+
+    def println(self, data):
+        self.answer = f'{self.answer}{data}\r\n'
+
+    def print(self, data):
+        self.answer = f'{self.answer}{data}'
+
+    def comment(self, letter: str, value: float):
+        self.println(f'{letter}:{value:.2f}')
+
+    def execute(self, gcode: str):
+        for gcode_line in gcode.split('\n'):
+            if not gcode_line:
+                continue
+
+            g = parse_gcode_line(gcode_line)
+            func = getattr(self, g.command.lower())
+            if func:
+                func(g)
+
+        self.println('ok')
+        return self.answer
+
+
+def parse_answer(answer):
+    answer_lines = answer.decode().strip().split('\r\n')[:-1]
+    values = []
+    for line in answer_lines:
+        value = line[2:].strip()
+        value = None if value.upper() == 'NAN' else float(value)
+        values.append((line[1], value))
+
+    return values
