@@ -274,6 +274,9 @@ class GrowboxGCodeBuilder:
             self.timer.CODE: self.timer,
         }
 
+    def set_actuator_value(self, actuator, value: int):
+        return self.actuators[actuator].set(value)
+
     def write(self, gcode_line: str, count_lines=1):
         return self.output.write(gcode_line, count_lines)
 
