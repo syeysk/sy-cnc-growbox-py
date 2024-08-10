@@ -494,15 +494,17 @@ class AutoTimerWindow(BaseAutoWindow):
         else:
             self.minutes_bits[index_byte] &= ~(128 >> index_bit_inside_byte)
 
-    def update(self, checked=None):
-        def result_update(data):
-            self.minutes_bits = data
-            for hour_index in range(0, 24):
-                are_checked = [
-                    self.get_bit(hour_index, minute_index) for minute_index in range(0, self.PARTS_PER_HOUR)
-                ]
-                self.set_cells(hour_index, are_checked)
+    def apply_bytes_list(self, bytes_list: list):
+        self.minutes_bits = bytes_list
+        for hour_index in range(0, 24):
+            are_checked = [
+                self.get_bit(hour_index, minute_index) for minute_index in range(0, self.PARTS_PER_HOUR)
+            ]
+            self.set_cells(hour_index, are_checked)
 
+    def update(self, checked=None):
+        def result_update(data: list):
+            self.apply_bytes_list(data)
             for byte_index, byte_value in enumerate(self.minutes_bits):
                 self.auto_buff.set_minute_bits(self.actuator_code, byte_index, byte_value)
 
@@ -596,6 +598,8 @@ class AutoTimerWindow(BaseAutoWindow):
             button_update.clicked.connect(self.update)
             layout.addWidget(button_update)
             self.update()
+        else:
+            self.apply_bytes_list(self.auto_buff.get_minute_bits(self.actuator_code))
 
 
 class TimeWindow(QWidget):

@@ -13,10 +13,12 @@ class BuffEmulator(MachineBase):
         self.time = self.buff.setdefault('time', {})
         self.mode = 'w'
 
+    def get_default_time_bytes(self):
+        return [0] * 12
+
     ## Датчики и исполнительные устройства, общие команды
 
     def e0(self, g):
-        self.buff['set_actuator_value'] = {'actuator': g['A'], 'value': g['V']}
         self.buff.setdefault('actuators', {}).setdefault(str(g['A']), {})['value'] = g['V']
 
     def e1(self, g):
@@ -40,14 +42,12 @@ class BuffEmulator(MachineBase):
     ## Время
 
     def e8(self, g):
-        self.buff['set_time'] = {'hours': g['H'], 'minutes': g['M']}
         self.time['time'] = (g['H'], g['M'])
 
     def e81(self, g):
         pass
 
     def e9(self, g):
-        self.buff['set_time_source'] = {'source': g['T']}
         self.time['source'] = g['T']
 
     def e91(self, g):
@@ -56,7 +56,6 @@ class BuffEmulator(MachineBase):
     ## Циклическая автоматика с резким переключением периода
 
     def e101(self, g):
-        self.buff['cycle_hard.set_duration'] = {'actuator': g['A'], 'period': g['B'], 'duration': g['D']}
         self.a_cycle_hard.setdefault(str(g['A']), {}).setdefault(str(g['B']), {})['duration'] = str(g['D'])
 
     def e1011(self, g):
@@ -67,7 +66,6 @@ class BuffEmulator(MachineBase):
         pass
 
     def e103(self, g):
-        self.buff['cycle_hard.set_value'] = {'actuator': g['A'], 'period': g['B'], 'value': g['V']}
         self.a_cycle_hard.setdefault(str(g['A']), {}).setdefault(str(g['B']), {})['value'] = str(g['V'])
 
     def e1031(self, g):
@@ -77,7 +75,6 @@ class BuffEmulator(MachineBase):
     ## Циклическая автоматика с плавной сменой периода
 
     def e151(self, g):
-        self.buff['cycle_soft.set_duration'] = {'actuator': g['A'], 'period': g['P'], 'duration': g['D']}
         self.a_cycle_soft.setdefault(str(g['A']), {}).setdefault(str(g['P']), {})['duration'] = str(g['D'])
 
     def e1511(self, g):
@@ -88,7 +85,6 @@ class BuffEmulator(MachineBase):
         pass
 
     def e153(self, g):
-        self.buff['cycle_soft.set_value'] = {'actuator': g['A'], 'period': g['P'], 'value': g['V']}
         self.a_cycle_soft.setdefault(str(g['A']), {}).setdefault(str(g['P']), {})['value'] = str(g['V'])
 
     def e1531(self, g):
@@ -98,21 +94,18 @@ class BuffEmulator(MachineBase):
     ## Условная автоматика климат-контроля
 
     def e201(self, g):
-        self.buff['climate_control.set_sensor'] = {'actuator': g['A'], 'sensor': g['S']}
         self.a_climate_control.setdefault(str(g['A']), {})['sensor'] = g['S']
 
     def e2011(self, g):
         self.comment('S', int(self.a_climate_control.get(str(g['A']), {}).get('sensor', '-1')))
 
     def e202(self, g):
-        self.buff['climate_control.set_min'] = {'actuator': g['A'], 'value': g['V']}
         self.a_climate_control.setdefault(str(g['A']), {})['min'] = str(g['V'])
 
     def e2021(self, g):
         self.comment('V', int(self.a_climate_control.get(str(g['A']), {}).get('min', '0')))
 
     def e203(self, g):
-        self.buff['climate_control.set_max'] = {'actuator': g['A'], 'value': g['V']}
         self.a_climate_control.setdefault(str(g['A']), {})['max'] = str(g['V'])
 
     def e2031(self, g):
@@ -121,15 +114,20 @@ class BuffEmulator(MachineBase):
     ## Автоматика по таймеру
 
     def e251(self, g):
-        self.buff['timer.set_minute_bits'] = {'actuator': g['A'], 'minute_byte': g['B'], 'byte_value': g['V']}
-        self.a_timer.setdefault(str(g['A']), {})[str(g['B'])] = str(g['V'])
+        actuator_data = self.a_timer.setdefault(str(g['A']), {})
+        bytes_list = actuator_data.get('bytes')
+        if not bytes_list:
+            bytes_list = self.get_default_time_bytes()
+            actuator_data['bytes'] = bytes_list
+
+        bytes_list[g['B']] = g['V']
 
     def e2511(self, g):
-        bytes_dict = self.a_timer.get(str(g['A']), {})
-        bytes_list = [0] * 12  # TODO: 12 replace by constanta
-        for byte_index, byte_value in bytes_dict.items():
-            if byte_index.isdigit():
-                bytes_list[int(byte_index)] = int(byte_value)
+        actuator_data = self.a_timer.setdefault(str(g['A']), {})
+        bytes_list = actuator_data.get('bytes')
+        if not bytes_list:
+            bytes_list = self.get_default_time_bytes()
+            actuator_data['bytes'] = bytes_list
 
         for byte_value in bytes_list:
             self.comment('V', byte_value)
