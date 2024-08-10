@@ -221,8 +221,8 @@ class AutoTimer(BaseAuto):
         answer_lines = self.output.write_and_parse(f'E2511 A{actuator}', 13, max_bytes=123)
         return [int(line[1]) for line in answer_lines]
 
-    def set_minute_bits(self, actuator: Actuator | int | str, minute_byte: int, byte_value: int):
-        self.output.write(f'E251 A{actuator} B{minute_byte} V{byte_value}')
+    def set_minute_bits(self, actuator: Actuator | int | str, byte_index: int, byte_value: int):
+        self.output.write(f'E251 A{actuator} B{byte_index} V{byte_value}')
 
 
 class GrowboxGCodeBuilder:

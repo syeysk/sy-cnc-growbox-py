@@ -2,7 +2,7 @@ import json
 import sys
 from pathlib import Path
 
-import requests
+
 import serial
 import yaml
 from PyQt6.QtCore import Qt
@@ -14,8 +14,9 @@ from PyQt6.QtWidgets import (
 )
 from serial.tools.list_ports import comports
 
+from adapters.http_adapter import HttpAdapter
 from gcode_builder import GrowboxGCodeBuilder
-from growbox_emulator import GrowboxEmulator
+from adapters.buff_emulator import BuffEmulator
 from thread_tools import SerialWorkersManager
 from set_value_windows import SetValueIntegerDialog, SetValueListDialog, SetValueTimeDialog
 
@@ -30,37 +31,40 @@ VEGETATIVE_GROWING = 1
 GENERATIVE_GROWING = 2
 
 
-def buff2gcode(buff_json, gcode):
+def copy_growbox_settings(growbox_from: GrowboxGCodeBuilder, growbox_to: GrowboxGCodeBuilder):
     # stop all autos
-    if buff_json.get('turn_off_all_autos', True):
-        gcode.turn_off_all_autos()
+    growbox_to.turn_off_all_autos()
+
+    # set time
+    growbox_to.set_time_source(growbox_from.get_time_source())
 
     # set values on actuators
-    actuators_json = buff_json.setdefault('actuators', {})
-    for actuator in gcode.actuators.values():
-        actuator.set(actuators_json.setdefault(str(actuator.code), {}).get('value', actuator.DEFAULT_VALUE))
+    for actuator in growbox_to.actuators.values():
+        actuator.set(growbox_from.actuators[actuator.code].get())
 
     # set autos
-    for actuator in gcode.actuators.values():
-        for auto in gcode.autos.values():
-            actuator_json = buff_json.get(str(auto.CODE), {}).get(str(actuator), {})
+    for actuator in growbox_to.actuators.values():
+        for auto in growbox_to.autos.values():
+            auto_buff = growbox_from.autos[auto.CODE]
             if auto.CODE in (0, 1):
                 for period in auto.PERIODS:
-                    period_json = actuator_json.get(str(period), {})
-                    auto.set_value(actuator, period, period_json.get('value', auto.DEFAULT_VALUE))
-                    auto.set_duration(actuator, period, period_json.get('duration', auto.DEFAULT_VALUE))
+                    auto.set_value(actuator, period, auto_buff.get_value(actuator))
+                    auto.set_duration(actuator, period, auto_buff.get_duration(actuator))
             elif auto.CODE == 2:
-                auto.set_min(actuator, actuator_json.get('min', auto.DEFAULT_MIN))
-                auto.set_max(actuator, actuator_json.get('max', auto.DEFAULT_MAX))
-                sensor = actuator_json.get('sensor')
-                if sensor is not None:
-                    auto.set_sensor(actuator, sensor)
+                auto.set_min(actuator, auto_buff.get_min(actuator))
+                auto.set_max(actuator, auto_buff.get_max(actuator))
+                sensor = auto_buff.get_sensor(actuator)
+                auto.set_sensor(actuator, sensor)
+            elif auto.CODE == 3:
+                bytes_list = auto_buff.get_minute_bits(actuator)
+                for byte_index, byte_value in enumerate(bytes_list):
+                    auto.set_minute_bits(actuator, byte_index, byte_value)
 
-    # start autos if needs
-    for actuator in gcode.actuators.values():
-        for auto in gcode.autos.values():
-            actuator_json = buff_json.get(str(auto.CODE), {}).get(str(actuator), {})
-            value = actuator_json.get('turn')
+    # start autos if we need they
+    for actuator in growbox_to.actuators.values():
+        for auto in growbox_to.autos.values():
+            auto_buff = growbox_from.autos[auto.CODE]
+            value = auto_buff.is_turn(actuator)
             if value:
                 auto.turn(actuator, value)
 
@@ -104,35 +108,6 @@ def generate_gcode(gcode: GrowboxGCodeBuilder, profile_data: dict, grow_mode: in
     # Настройка дальнего красного света
 
 
-class HttpAdapter:
-    def __init__(self, url, timeout_read: int, timeout_write):
-        self.url = url
-        self.mode = 'w'
-        self.response_data = ''
-        self.timeout_read = int(timeout_read)
-        self.timeout_write = timeout_write
-
-    def write(self, row_string):
-        params = {'action': 'send_to_serial', 'string_data': row_string, 'timeout_read': self.timeout_read}
-        try:
-            response = requests.post(f'{self.url}/api.c', params=params, timeout=self.timeout_write)
-        except requests.ReadTimeout as error:
-            print('read:', str(error), 'gcode:', row_string)
-        except requests.ConnectTimeout as error:
-            print('connect timeout:', str(error), 'gcode:', row_string)
-        except requests.ConnectionError as error:
-            print('connect error:', str(error), 'gcode:', row_string)
-        else:
-            if response.status_code == 200:
-                string_response_data = response.json()['data']['string_response_data']
-                self.response_data = f'{self.response_data}{string_response_data}'
-
-    def read(self, length):
-        data_to_return = self.response_data[:length]
-        self.response_data = self.response_data[length:]
-        return data_to_return.encode()
-
-
 class BaseAutoWindow(QWidget):
     is_closed = False
 
@@ -146,7 +121,7 @@ class BaseAutoWindow(QWidget):
             actuator_code,
             actuator_name,
             gcode: GrowboxGCodeBuilder,
-            buff_json: dict,
+            growbox_buff,
             checkboxes,
             open_type,
             worker_manager,
@@ -166,8 +141,8 @@ class BaseAutoWindow(QWidget):
         self.checkbox_turn = QCheckBox('Включена')
         self.checkbox_turn.clicked.connect(self.btn_toggle_auto_clicked)
 
-        self.actuator_json = buff_json.get(str(gcode_auto.CODE), {}).get(str(self.actuator_code), {})
-        self.checkbox_turn.setChecked(self.actuator_json.get('turn', False))
+        self.auto_buff = growbox_buff.autos[gcode_auto.CODE]
+        self.checkbox_turn.setChecked(self.auto_buff.is_turn(actuator_code))
 
     def btn_toggle_auto_clicked(self, checked):
         self.gcode_auto.turn(actuator=self.actuator_code, status=checked)
@@ -261,9 +236,10 @@ class AutoCycleHardWindow(BaseAutoWindow):
             layout_grid = QGridLayout()
             groupbox = QGroupBox(period_text)
 
-            period_json = self.actuator_json.get(str(period_code), {})
-            self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, period_json.get('duration', '0'))
-            self.build_btn_set_value(layout_grid, period_code, 'Значение:', 1, period_json.get('value', '0'))
+            duration = str(self.auto_buff.get_duration(period_code, self.actuator_code))
+            value = str(self.auto_buff.get_value(period_code, self.actuator_code))
+            self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, duration)
+            self.build_btn_set_value(layout_grid, period_code, 'Значение:', 1, value)
 
             groupbox.setLayout(layout_grid)
             layout.addWidget(groupbox)
@@ -358,10 +334,11 @@ class AutoCycleSoftWindow(BaseAutoWindow):
             layout_grid = QGridLayout()
             groupbox = QGroupBox(period_text)
 
-            period_json = self.actuator_json.get(str(period_code), {})
-            self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, period_json.get('duration', '0'))
+            duration = str(self.auto_buff.get_duration(period_code, self.actuator_code))
+            self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, duration)
             if period_code % 2 != 0:
-                self.build_btn_set_value(layout_grid, period_code, 'Значение:', 1, period_json.get('value', '0'))
+                value = str(self.auto_buff.get_value(period_code, self.actuator_code))
+                self.build_btn_set_value(layout_grid, period_code, 'Значение:', 1, value)
 
             groupbox.setLayout(layout_grid)
             layout.addWidget(groupbox)
@@ -387,7 +364,7 @@ class AutoClimateControlWindow(BaseAutoWindow):
             self.gcode.s_humid.code: 'Влажность',
             self.gcode.s_temperature.code: 'Температура',
         }
-        self.sensor_code = int(self.actuator_json.get('sensor', -1))
+        self.sensor_code = self.auto_buff.get_sensor(self.actuator_code)
 
         layout = QVBoxLayout()
         layout.addWidget(QLabel(f'Автоматика с автоподстройкой значения для устройства "{self.actuator_name}"'))
@@ -397,7 +374,8 @@ class AutoClimateControlWindow(BaseAutoWindow):
         layout.addLayout(layout_grid)
 
         text = 'Мин. допустимое значение:'
-        self.label_value_min = QLabel(self.format_value(self.actuator_json.get('min', 0)))
+        min_value = self.auto_buff.get_min(self.actuator_code)
+        self.label_value_min = QLabel(self.format_value(min_value))
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, self.label_value_min, 'min'))
         layout_grid.addWidget(QLabel(text), 0, 0)
@@ -405,7 +383,8 @@ class AutoClimateControlWindow(BaseAutoWindow):
         layout_grid.addWidget(button, 0, 2)
 
         text = 'Макс. допустимое значение:'
-        self.label_value_max = QLabel(self.format_value(self.actuator_json.get('max', '0')))
+        max_value = self.auto_buff.get_max(self.actuator_code)
+        self.label_value_max = QLabel(self.format_value(max_value))
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, self.label_value_max, 'max'))
         layout_grid.addWidget(QLabel(text), 1, 0)
@@ -524,6 +503,9 @@ class AutoTimerWindow(BaseAutoWindow):
                 ]
                 self.set_cells(hour_index, are_checked)
 
+            for byte_index, byte_value in enumerate(self.minutes_bits):
+                self.auto_buff.set_minute_bits(self.actuator_code, byte_index, byte_value)
+
         def task_update():
             return self.gcode_auto.get_minute_bits(self.actuator_code)
 
@@ -541,16 +523,19 @@ class AutoTimerWindow(BaseAutoWindow):
 
         for index_byte in {self.get_index_byte(hour, minute_index) for minute_index in range(0, self.PARTS_PER_HOUR)}:
             self.gcode_auto.set_minute_bits(self.actuator_code, index_byte, self.minutes_bits[index_byte])
+            self.auto_buff.set_minute_bits(self.actuator_code, index_byte, self.minutes_bits[index_byte])
 
     def minute_btn_clicked(self, btn):
-        minute = btn.property('minute')
+        minute_index = btn.property('minute')
         hour = btn.property('hour')
         is_checked = not btn.property('is_checked')
         self.toggle_btn(btn, is_checked)
 
-        self.set_bit(hour, minute, int(is_checked))
-        index_byte = self.get_index_byte(hour, minute)
+        self.set_bit(hour, minute_index, int(is_checked))
+
+        index_byte = self.get_index_byte(hour, minute_index)
         self.gcode_auto.set_minute_bits(self.actuator_code, index_byte, self.minutes_bits[index_byte])
+        self.auto_buff.set_minute_bits(self.actuator_code, index_byte, self.minutes_bits[index_byte])
 
         count_checked = sum(self.get_bit(hour, minute_index) for minute_index in range(0, self.PARTS_PER_HOUR))
         self.toggle_btn(self.hour_btns[hour], count_checked == self.PARTS_PER_HOUR)
@@ -575,7 +560,7 @@ class AutoTimerWindow(BaseAutoWindow):
 
             minute_layout = QVBoxLayout()
             for minute in range(0, self.PARTS_PER_HOUR):
-                minute_button = QPushButton(str(minute * self.MINUTE_DIVISION_PRICE))
+                minute_button = QPushButton(str(int(minute * self.MINUTE_DIVISION_PRICE)))
                 minute_button.setFixedHeight(18)
                 minute_button.setProperty('minute', minute)
                 minute_button.setProperty('hour', hour)
@@ -648,6 +633,7 @@ class TimeWindow(QWidget):
         if dlg.exec():
             value = dlg.value
             self.label_time_source.setText(self.source_times[value])
+            self.growbox_buff.set_time_source(value)
             self.gcode.set_time_source(value)
 
     def btn_set_time_clicked(self, _):
@@ -659,7 +645,7 @@ class TimeWindow(QWidget):
     def __init__(
             self,
             gcode: GrowboxGCodeBuilder,
-            buff_json: dict,
+            growbox_buff: GrowboxGCodeBuilder,
             label_time,
             open_type,
             worker_manager,
@@ -670,7 +656,7 @@ class TimeWindow(QWidget):
         self.gcode = gcode
         self.open_type = open_type
         self.worker_manager = worker_manager
-        self.buff_json = buff_json
+        self.growbox_buff = growbox_buff
         self.setWindowTitle(f'Настройка времени')
         self.source_times = {
             0: 'Процессор', 1: 'Встроенные часы',
@@ -784,7 +770,7 @@ class MainPanelWindow(QMainWindow):
         #         return
         if file_path:
             with open(file_path, 'w') as output_file:
-                buff2gcode(self.buff_json, GrowboxGCodeBuilder(output_file, need_wait_answer=False))
+                copy_growbox_settings(self.growbox_buff, GrowboxGCodeBuilder(output_file, need_wait_answer=False))
 
             if not self.file_path:
                 self.file_path = Path(file_path)
@@ -802,7 +788,7 @@ class MainPanelWindow(QMainWindow):
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение JSON', default_file_name, '*.json')
         if file_path:
             with open(file_path, 'w') as output_file:
-                json.dump(self.buff_json, output_file)
+                json.dump(self.growbox_buff.output.output.buff, output_file)
 
             if not self.file_path:
                 self.file_path = Path(file_path)
@@ -826,14 +812,11 @@ class MainPanelWindow(QMainWindow):
             # menu_file.addAction(button_action_send_json)
             menu_file.addAction(button_action_send_gcode)
 
-    def apply_gcode_to_gui(self, gcode_line):
-        self.growbox_emulator.execute(gcode_line)
-
     def open_time_window_clicked(self, checked):
         if self.window_time is None or self.window_time.is_closed:
             opened_window = TimeWindow(
                 self.gcode,
-                self.buff_json,
+                self.growbox_buff,
                 self.label_time,
                 self.open_type,
                 self.worker_manager,
@@ -901,7 +884,7 @@ class MainPanelWindow(QMainWindow):
                 actuator_code,
                 actuator_name,
                 self.gcode,
-                self.buff_json,
+                self.growbox_buff,
                 self.turn_checkboxes,
                 self.open_type,
                 self.worker_manager,
@@ -913,21 +896,16 @@ class MainPanelWindow(QMainWindow):
         gcode_auto.turn(actuator_code, checked)
 
     def btn_turn_off_all_autos_clicked(self, checked):
-        for key, checkbox in self.turn_checkboxes.items():
+        self.growbox_buff.turn_off_all_autos()
+        for checkbox in self.turn_checkboxes.values():
             if checkbox.isChecked():
                 checkbox.setChecked(False)
-                auto_code, actuator_code = key.split('-')
-                auto_data = self.buff_json.get(auto_code)
-                if auto_data:
-                    actuator_data = auto_data.get(actuator_code)
-                    if actuator_data.get('turn'):
-                        actuator_data['turn'] = False
 
         self.gcode.turn_off_all_autos()
 
     def build_btn_set_value(self, layout, actuator_code: int, text, y):
-        default_value = self.gcode.actuators[actuator_code].DEFAULT_VALUE
-        value = self.buff_json.get('actuators', {}).get(str(actuator_code), {}).get('value', default_value)
+        value = self.growbox_buff.actuators[actuator_code].get()
+
         label_value = QLabel(str(value))
         self.actuator_widgets[actuator_code] = label_value
 
@@ -951,7 +929,7 @@ class MainPanelWindow(QMainWindow):
     def build_autos_layout(self, gcode_auto, actuator_code, actuator_name):
         is_turned = False
         if self.open_type == 'open':
-            is_turned = self.buff_json.get(str(gcode_auto.CODE), {}).get(str(actuator_code), {}).get('turn', False)
+            is_turned = self.growbox_buff.autos[gcode_auto.CODE].is_turn(actuator_code)
 
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_open_auto_clicked(s, gcode_auto, actuator_code, actuator_name))
@@ -1023,12 +1001,13 @@ class MainPanelWindow(QMainWindow):
             self.worker_manager.current_worker.signals.callback_write.emit(gcode_line)
         else:
             self.print_to_log(gcode_line)
-            self.apply_gcode_to_gui(gcode_line)
+            self.growbox_buff.write(gcode_line)
+            self.growbox_buff.output.output.answer = ''
 
     def worker_update_from_growbox(self):
         def result_autos(data):
             auto_code, actuator_code, is_turned = data
-            self.buff_json.setdefault(auto_code, {}).setdefault(actuator_code, {})['turn'] = is_turned
+            self.growbox_buff.autos[int(auto_code)].turn(actuator_code, is_turned)
             self.turn_checkboxes[f'{auto_code}-{actuator_code}'].setChecked(is_turned)
 
         def get_autos(key):
@@ -1080,8 +1059,7 @@ class MainPanelWindow(QMainWindow):
         self.progress_bar = None
         self.auto_windows = {}
         self.turn_checkboxes = {}
-        self.buff_json = {}
-        self.growbox_emulator = GrowboxEmulator(self.buff_json)
+        self.growbox_buff = GrowboxGCodeBuilder(BuffEmulator())
         self.sensor_widgets = {}
         self.actuator_widgets = {}
         self.worker_manager = SerialWorkersManager(
@@ -1098,14 +1076,15 @@ class MainPanelWindow(QMainWindow):
         if open_type == 'open' and open_subtype == 'json':
             self.print_to_status_bar(str(file_path), 1)
             with file_path.open() as json_file:
-                self.buff_json = json.load(json_file)
+                self.growbox_buff.output.output.buff = json.load(json_file)
                 self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write, need_wait_answer=False)
         elif open_type == 'open' and open_subtype == 'gcode':
             self.print_to_status_bar(str(file_path), 1)
             self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write, need_wait_answer=False)
             with file_path.open() as gcode_file:
                 for gcode_line in gcode_file:
-                    self.apply_gcode_to_gui(gcode_line)
+                    self.growbox_buff.write(gcode_line)
+                    self.growbox_buff.output.output.answer = ''
         elif open_type == 'create':
             self.print_to_status_bar('Новый файл', 1)
             self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write, need_wait_answer=False)

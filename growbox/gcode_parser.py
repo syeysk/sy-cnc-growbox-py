@@ -41,7 +41,7 @@ class MachineBase:
     def comment(self, letter: str, value: float):
         self.println(f'{letter}:{value:.2f}')
 
-    def execute(self, gcode: str):
+    def write(self, gcode: str):
         for gcode_line in gcode.split('\n'):
             if not gcode_line:
                 continue
@@ -52,7 +52,11 @@ class MachineBase:
                 func(g)
 
         self.println('ok')
-        return self.answer
+
+    def read(self, length):
+        data_to_return = self.answer[:length]
+        self.answer = self.answer[length:]
+        return data_to_return.encode()
 
 
 def parse_answer(answer):
