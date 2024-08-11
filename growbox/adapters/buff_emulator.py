@@ -51,7 +51,7 @@ class BuffEmulator(MachineBase):
         self.time['source'] = g['T']
 
     def e91(self, g):
-        pass
+        self.comment('D', self.time.get('source', 0))
 
     ## Циклическая автоматика с резким переключением периода
 
@@ -70,7 +70,7 @@ class BuffEmulator(MachineBase):
 
     def e1031(self, g):
         period_json = self.a_cycle_hard.get(str(g['A']), {}).get(str(g['B']), {})
-        self.comment('V', int(period_json.get('value', '0')))
+        self.comment('V', int(period_json.get('value', '255' if g['B'] else '0')))
 
     ## Циклическая автоматика с плавной сменой периода
 
@@ -97,7 +97,7 @@ class BuffEmulator(MachineBase):
         self.a_climate_control.setdefault(str(g['A']), {})['sensor'] = g['S']
 
     def e2011(self, g):
-        self.comment('S', int(self.a_climate_control.get(str(g['A']), {}).get('sensor', '-1')))
+        self.comment('S', int(self.a_climate_control.get(str(g['A']), {}).get('sensor', '0')))
 
     def e202(self, g):
         self.a_climate_control.setdefault(str(g['A']), {})['min'] = str(g['V'])

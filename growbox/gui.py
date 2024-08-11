@@ -46,10 +46,16 @@ def copy_growbox_settings(growbox_from: GrowboxGCodeBuilder, growbox_to: Growbox
     for actuator in growbox_to.actuators.values():
         for auto in growbox_to.autos.values():
             auto_buff = growbox_from.autos[auto.CODE]
-            if auto.CODE in (0, 1):
+            if auto.CODE == 0:
                 for period in auto.PERIODS:
-                    auto.set_value(actuator, period, auto_buff.get_value(actuator))
-                    auto.set_duration(actuator, period, auto_buff.get_duration(actuator))
+                    auto.set_value(actuator, period, auto_buff.get_value(actuator, period))
+                    auto.set_duration(actuator, period, auto_buff.get_duration(actuator, period))
+            elif auto.CODE == 1:
+                for period in auto.PERIODS:
+                    if period % 2 != 0:
+                        auto.set_value(actuator, period, auto_buff.get_value(actuator, period))
+
+                    auto.set_duration(actuator, period, auto_buff.get_duration(actuator, period))
             elif auto.CODE == 2:
                 auto.set_min(actuator, auto_buff.get_min(actuator))
                 auto.set_max(actuator, auto_buff.get_max(actuator))
@@ -161,23 +167,16 @@ class AutoCycleHardWindow(BaseAutoWindow):
     def set_duration(self, period_code, duration):
         str_duration = self.format_duration(duration)
         self.labels_by_period.setdefault(period_code, {})['duration'].setText(str_duration)
-        self.period_data.setdefault(period_code, {})['duration'] = duration
-
-    def get_duration(self, period):
-        return self.period_data.get(period, {}).get('duration', 0)
 
     def set_value(self, period_code, value):
         self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
-        self.period_data.setdefault(period_code, {})['value'] = value
-
-    def get_value(self, period):
-        return self.period_data.get(period, {}).get('value', 0)
 
     def btn_set_value_clicked(self, checked, period_code, text, what_set):
+        value = getattr(self.auto_buff, f'get_{what_set}')(self.actuator_code, period_code)
         if what_set == 'value':
-            dlg = SetValueIntegerDialog(self, text, getattr(self, f'get_{what_set}')(period_code))
+            dlg = SetValueIntegerDialog(self, text, value)
         else:
-            dlg = SetValueTimeDialog(self, text, getattr(self, f'get_{what_set}')(period_code))
+            dlg = SetValueTimeDialog(self, text, value)
 
         if dlg.exec():
             value = dlg.value
@@ -201,6 +200,9 @@ class AutoCycleHardWindow(BaseAutoWindow):
             period_code, duration, value = data
             self.set_duration(period_code, duration)
             self.set_value(period_code, value)
+
+            self.auto_buff.get_duration(self.actuator_code, period_code)
+            self.auto_buff.get_value(self.actuator_code, period_code)
 
         def task_update(period_code):
             return (
@@ -228,7 +230,6 @@ class AutoCycleHardWindow(BaseAutoWindow):
         layout.addWidget(self.checkbox_turn)
         self.setLayout(layout)
         self.labels_by_period = {}
-        self.period_data = {}
         self.label_current = None
         self.label_current_mask = 'Прошло {} минуты {} состояния'
 
@@ -236,9 +237,9 @@ class AutoCycleHardWindow(BaseAutoWindow):
             layout_grid = QGridLayout()
             groupbox = QGroupBox(period_text)
 
-            duration = str(self.auto_buff.get_duration(period_code, self.actuator_code))
-            value = str(self.auto_buff.get_value(period_code, self.actuator_code))
-            self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, duration)
+            duration = self.auto_buff.get_duration(self.actuator_code, period_code)
+            value = str(self.auto_buff.get_value(self.actuator_code, period_code))
+            self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, self.format_duration(duration))
             self.build_btn_set_value(layout_grid, period_code, 'Значение:', 1, value)
 
             groupbox.setLayout(layout_grid)
@@ -257,23 +258,16 @@ class AutoCycleSoftWindow(BaseAutoWindow):
     def set_duration(self, period_code, duration):
         str_duration = self.format_duration(duration)
         self.labels_by_period.setdefault(period_code, {})['duration'].setText(str_duration)
-        self.period_data.setdefault(period_code, {})['duration'] = duration
-
-    def get_duration(self, period):
-        return self.period_data.get(period, {}).get('duration', 0)
 
     def set_value(self, period_code, value):
         self.labels_by_period.setdefault(period_code, {})['value'].setText(str(value))
-        self.period_data.setdefault(period_code, {})['value'] = value
 
-    def get_value(self, period):
-        return self.period_data.get(period, {}).get('value', 0)
-
-    def btn_set_value_clicked(self, checked, period_code, text, label_value, what_set):
+    def btn_set_value_clicked(self, checked, period_code, text, what_set):
+        value = getattr(self.auto_buff, f'get_{what_set}')(self.actuator_code, period_code)
         if what_set == 'value':
-            dlg = SetValueIntegerDialog(self, text, int(label_value.text()), maximum=255)
+            dlg = SetValueIntegerDialog(self, text, value, maximum=255)
         else:
-            dlg = SetValueTimeDialog(self, text, getattr(self, f'get_{what_set}')(period_code))
+            dlg = SetValueTimeDialog(self, text, value)
 
         if dlg.exec():
             value = dlg.value
@@ -286,7 +280,7 @@ class AutoCycleSoftWindow(BaseAutoWindow):
         button = QPushButton('✎')
         what_set = 'value' if y else 'duration'
         self.labels_by_period.setdefault(period_code, {})[what_set] = label_value
-        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, label_value, what_set))
+        button.clicked.connect(lambda s: self.btn_set_value_clicked(s, period_code, text, what_set))
 
         layout.addWidget(QLabel(text), y, 0)
         layout.addWidget(label_value, y, 1)
@@ -298,6 +292,10 @@ class AutoCycleSoftWindow(BaseAutoWindow):
             self.set_duration(period_code, duration)
             if period_code % 2 != 0:
                 self.set_value(period_code, value)
+
+            self.auto_buff.set_duration(self.actuator_code, period_code, duration)
+            if period_code % 2 != 0:
+                self.auto_buff.set_value(self.actuator_code, period_code, value)
 
         def task_update(period_code):
             return (
@@ -328,16 +326,16 @@ class AutoCycleSoftWindow(BaseAutoWindow):
         self.labels_by_period = {}
         self.label_current = None
         self.label_current_mask = 'Прошло {} минуты {}'
-        self.period_data = {}
+        # self.period_data = {}
 
         for period_code, period_text in enumerate(('Рассвет', 'День', 'Закат', 'Ночь')):
             layout_grid = QGridLayout()
             groupbox = QGroupBox(period_text)
 
-            duration = str(self.auto_buff.get_duration(period_code, self.actuator_code))
-            self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, duration)
+            duration = self.auto_buff.get_duration(self.actuator_code, period_code)
+            self.build_btn_set_value(layout_grid, period_code, 'Длительность:', 0, self.format_duration(duration))
             if period_code % 2 != 0:
-                value = str(self.auto_buff.get_value(period_code, self.actuator_code))
+                value = str(self.auto_buff.get_value(self.actuator_code, period_code))
                 self.build_btn_set_value(layout_grid, period_code, 'Значение:', 1, value)
 
             groupbox.setLayout(layout_grid)
@@ -384,6 +382,7 @@ class AutoClimateControlWindow(BaseAutoWindow):
 
         text = 'Макс. допустимое значение:'
         max_value = self.auto_buff.get_max(self.actuator_code)
+        print(max_value)
         self.label_value_max = QLabel(self.format_value(max_value))
         button = QPushButton('✎')
         button.clicked.connect(lambda s: self.btn_set_value_clicked(s, text, self.label_value_max, 'max'))
@@ -443,6 +442,10 @@ class AutoClimateControlWindow(BaseAutoWindow):
             self.label_value_max.setText(self.format_value(vmax))
             self.label_value_sensor.setText(self.sensors[sensor])
 
+            self.auto_buff.set_min(self.actuator_code, vmin)
+            self.auto_buff.set_max(self.actuator_code, vmax)
+            self.auto_buff.set_sensor(self.actuator_code, sensor)
+
         def task_update():
             return (
                 self.gcode_auto.get_min(self.actuator_code),
@@ -494,17 +497,15 @@ class AutoTimerWindow(BaseAutoWindow):
         else:
             self.minutes_bits[index_byte] &= ~(128 >> index_bit_inside_byte)
 
-    def apply_bytes_list(self, bytes_list: list):
-        self.minutes_bits = bytes_list
-        for hour_index in range(0, 24):
-            are_checked = [
-                self.get_bit(hour_index, minute_index) for minute_index in range(0, self.PARTS_PER_HOUR)
-            ]
-            self.set_cells(hour_index, are_checked)
-
     def update(self, checked=None):
         def result_update(data: list):
-            self.apply_bytes_list(data)
+            self.minutes_bits = data
+            for hour_index in range(0, 24):
+                are_checked = [
+                    self.get_bit(hour_index, minute_index) for minute_index in range(0, self.PARTS_PER_HOUR)
+                ]
+                self.set_cells(hour_index, are_checked)
+
             for byte_index, byte_value in enumerate(self.minutes_bits):
                 self.auto_buff.set_minute_bits(self.actuator_code, byte_index, byte_value)
 
@@ -560,6 +561,7 @@ class AutoTimerWindow(BaseAutoWindow):
             self.hour_btns[hour] = hour_button
             hour_layout.addWidget(hour_button)
 
+            are_checked = []
             minute_layout = QVBoxLayout()
             for minute in range(0, self.PARTS_PER_HOUR):
                 minute_button = QPushButton(str(int(minute * self.MINUTE_DIVISION_PRICE)))
@@ -570,9 +572,11 @@ class AutoTimerWindow(BaseAutoWindow):
                 minute_button.clicked.connect(_minute_btn_clicked(minute_button))
                 self.minute_btns_by_hours.setdefault(hour, []).append(minute_button)
                 minute_layout.addWidget(minute_button)
+                are_checked.append(self.get_bit(hour, minute))
 
             hour_layout.addLayout(minute_layout)
             layout.addLayout(hour_layout)
+            self.set_cells(hour, are_checked)
 
         return layout
 
@@ -584,7 +588,7 @@ class AutoTimerWindow(BaseAutoWindow):
         self.setLayout(layout)
         self.minute_btns_by_hours = {}
         self.hour_btns = {}
-        self.minutes_bits = []
+        self.minutes_bits = self.auto_buff.get_minute_bits(self.actuator_code)
 
         help_layout = QHBoxLayout()
         help_layout.addLayout(self.build_time_buttons(0, 6))
@@ -598,8 +602,6 @@ class AutoTimerWindow(BaseAutoWindow):
             button_update.clicked.connect(self.update)
             layout.addWidget(button_update)
             self.update()
-        else:
-            self.apply_bytes_list(self.auto_buff.get_minute_bits(self.actuator_code))
 
 
 class TimeWindow(QWidget):
@@ -787,6 +789,12 @@ class MainPanelWindow(QMainWindow):
             self.gcode_send_window = window
             window.show()
 
+    def btn_load_and_save_gcode(self, checked):
+        file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение G-кода', '', '*.gcode')
+        if file_path:
+            with open(file_path, 'w') as output_file:
+                copy_growbox_settings(self.gcode, GrowboxGCodeBuilder(output_file, need_wait_answer=False))
+
     def btn_save_json(self, checked):
         default_file_name = self.file_path.stem if self.file_path else ''
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение JSON', default_file_name, '*.json')
@@ -803,7 +811,7 @@ class MainPanelWindow(QMainWindow):
         menu_file = menu.addMenu('Файл')
 
         if self.open_type in ('open', 'create'):
-            button_action_save = QAction('Сохранить как G-код', self)
+            button_action_save = QAction('Сохранить', self)
             button_action_save.triggered.connect(self.btn_save_gcode)
             # button_action_save_json = QAction('Сохранить как JSON', self)
             # button_action_save_json.triggered.connect(self.btn_save_json)
@@ -811,10 +819,13 @@ class MainPanelWindow(QMainWindow):
             # menu_file.addAction(button_action_save_json)
         if self.open_type == 'connect':
             # button_action_send_json = QAction('Открыть JSON и послать в гроубокс', self)
-            button_action_send_gcode = QAction('Открыть G-код и послать в гроубокс', self)
+            button_action_send_gcode = QAction('Открыть и загрузить в гроубокс', self)
             button_action_send_gcode.triggered.connect(self.btn_send_gcode)
+            button_action_save_gcode = QAction('Выгрузить из гроубокса и сохранить', self)
+            button_action_save_gcode.triggered.connect(self.btn_load_and_save_gcode)
             # menu_file.addAction(button_action_send_json)
             menu_file.addAction(button_action_send_gcode)
+            menu_file.addAction(button_action_save_gcode)
 
     def open_time_window_clicked(self, checked):
         if self.window_time is None or self.window_time.is_closed:
