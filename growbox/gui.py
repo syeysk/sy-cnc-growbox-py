@@ -14,11 +14,11 @@ from PyQt6.QtWidgets import (
 )
 from serial.tools.list_ports import comports
 
-from adapters.http_adapter import HttpAdapter
-from gcode_builder import GrowboxGCodeBuilder
-from adapters.buff_emulator import BuffEmulator
-from thread_tools import SerialWorkersManager
-from set_value_windows import SetValueIntegerDialog, SetValueListDialog, SetValueTimeDialog
+from growbox.adapters.http_adapter import HttpAdapter
+from growbox.gcode_builder import GrowboxGCodeBuilder
+from growbox.adapters.buff_emulator import BuffEmulator
+from growbox.thread_tools import SerialWorkersManager
+from growbox.set_value_windows import SetValueIntegerDialog, SetValueListDialog, SetValueTimeDialog
 
 SHADE_AVOIDANCE = 1
 SHADE_TOLERANCE = 2

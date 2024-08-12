@@ -3,7 +3,7 @@ import sys
 
 import serial
 
-from gcode_parser import parse_answer
+from growbox.gcode_parser import parse_answer
 
 # commands = {}
 
