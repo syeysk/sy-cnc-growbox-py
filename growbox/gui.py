@@ -201,8 +201,8 @@ class AutoCycleHardWindow(BaseAutoWindow):
             self.set_duration(period_code, duration)
             self.set_value(period_code, value)
 
-            self.auto_buff.get_duration(self.actuator_code, period_code)
-            self.auto_buff.get_value(self.actuator_code, period_code)
+            self.auto_buff.set_duration(self.actuator_code, period_code, duration)
+            self.auto_buff.set_value(self.actuator_code, period_code, value)
 
         def task_update(period_code):
             return (
