@@ -1,7 +1,7 @@
 import os
 
-# with open('requirements.txt') as file_requirements:
-#     install_requires = file_requirements.read().split('\n')
+with open('requirements.txt') as file_requirements:
+    install_requires = file_requirements.read().split('\n')
 
 try:
     from setuptools import setup
@@ -35,7 +35,7 @@ setup(
     url='https://github.com/syeysk/sy-cnc-growbox-py',
     download_url='https://github.com/syeysk/sy-cnc-growbox-py/archive/master.zip',
 
-    # install_requires=install_requires,
+    install_requires=install_requires,
 
     entry_points={
         'gui_scripts': [

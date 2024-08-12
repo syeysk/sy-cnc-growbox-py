@@ -7,7 +7,7 @@ It's python and GUI interfaces for [CNC Growbox ](https://github.com/syeysk/sy-c
 To install this program use:
 
 ```shell
-pip install git+https://github.com/syeysk/sy-cnc-growbox-py
+pip install git+https://github.com/syeysk/sy-cnc-growbox-py.git
 ```
 
 ## Use python-api interface
