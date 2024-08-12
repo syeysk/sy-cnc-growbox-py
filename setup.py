@@ -26,6 +26,7 @@ setup(
     description='Python interfaces for CNC Growbox',
     packages=[
         'growbox',
+        'growbox.adapters',
     ],
     long_description=get_long_description(),
     author='Konstantin Polyakov',
