@@ -51,3 +51,9 @@ To run GUI use:
 ```shell
 growbox
 ```
+
+or 
+
+```shell
+python -m growbox.gui
+```
