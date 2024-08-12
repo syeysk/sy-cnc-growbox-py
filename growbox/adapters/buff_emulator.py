@@ -51,7 +51,7 @@ class BuffEmulator(MachineBase):
         self.time['source'] = g['T']
 
     def e91(self, g):
-        self.comment('D', self.time.get('source', 0))
+        self.comment('T', self.time.get('source', 0))
 
     ## Циклическая автоматика с резким переключением периода
 
