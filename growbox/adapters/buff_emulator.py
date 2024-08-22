@@ -1,8 +1,8 @@
-from growbox.gcode_builder import AutoCycleHard, AutoCycleSoft, AutoClimateControl, AutoTimer
-from growbox.gcode_parser import MachineBase
+from sygrowbox.gcode_builder import AutoCycleHard, AutoCycleSoft, AutoClimateControl, AutoTimer
+from sygrowbox.base_emulator import BaseEmulator
 
 
-class BuffEmulator(MachineBase):
+class BuffEmulator(BaseEmulator):
     def __init__(self):
         super().__init__()
         self.buff = {}

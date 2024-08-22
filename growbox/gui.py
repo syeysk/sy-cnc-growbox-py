@@ -3,7 +3,6 @@ import sys
 from pathlib import Path
 
 
-import serial
 import yaml
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
@@ -15,7 +14,8 @@ from PyQt6.QtWidgets import (
 from serial.tools.list_ports import comports
 
 from growbox.adapters.http_adapter import HttpAdapter
-from growbox.gcode_builder import GrowboxGCodeBuilder
+from growbox.adapters.serial_adapter import SerialAdapter
+from growbox.sygrowbox.gcode_builder import GrowboxGCodeBuilder
 from growbox.adapters.buff_emulator import BuffEmulator
 from growbox.thread_tools import SerialWorkersManager
 from growbox.set_value_windows import SetValueIntegerDialog, SetValueListDialog, SetValueTimeDialog
@@ -775,8 +775,8 @@ class MainPanelWindow(QMainWindow):
         #     if not dlg.exec():
         #         return
         if file_path:
-            with open(file_path, 'w') as output_file:
-                copy_growbox_settings(self.growbox_buff, GrowboxGCodeBuilder(output_file, need_wait_answer=False))
+            with open(file_path, 'wb') as output_file:
+                copy_growbox_settings(self.growbox_buff, GrowboxGCodeBuilder(output_file))
 
             if not self.file_path:
                 self.file_path = Path(file_path)
@@ -792,8 +792,8 @@ class MainPanelWindow(QMainWindow):
     def btn_load_and_save_gcode(self, checked):
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение G-кода', '', '*.gcode')
         if file_path:
-            with open(file_path, 'w') as output_file:
-                copy_growbox_settings(self.gcode, GrowboxGCodeBuilder(output_file, need_wait_answer=False))
+            with open(file_path, 'wb') as output_file:
+                copy_growbox_settings(self.gcode, GrowboxGCodeBuilder(output_file))
 
     def btn_save_json(self, checked):
         default_file_name = self.file_path.stem if self.file_path else ''
@@ -1074,7 +1074,7 @@ class MainPanelWindow(QMainWindow):
         self.progress_bar = None
         self.auto_windows = {}
         self.turn_checkboxes = {}
-        self.growbox_buff = GrowboxGCodeBuilder(BuffEmulator())
+        self.growbox_buff = GrowboxGCodeBuilder(BuffEmulator(), need_wait_answer=True)
         self.sensor_widgets = {}
         self.actuator_widgets = {}
         self.worker_manager = SerialWorkersManager(
@@ -1092,29 +1092,30 @@ class MainPanelWindow(QMainWindow):
             self.print_to_status_bar(str(file_path), 1)
             with file_path.open() as json_file:
                 self.growbox_buff.output.output.buff = json.load(json_file)
-                self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write, need_wait_answer=False)
+                self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
         elif open_type == 'open' and open_subtype == 'gcode':
             self.print_to_status_bar(str(file_path), 1)
-            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write, need_wait_answer=False)
+            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
             with file_path.open() as gcode_file:
                 for gcode_line in gcode_file:
                     self.growbox_buff.write(gcode_line)
                     self.growbox_buff.output.output.answer = ''
         elif open_type == 'create':
             self.print_to_status_bar('Новый файл', 1)
-            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write, need_wait_answer=False)
+            self.gcode = GrowboxGCodeBuilder(callback_write=self.callback_write)
         elif open_type == 'connect' and open_subtype == 'serial':
             self.print_to_status_bar(str(file_path), 1)
-            serial_adapter = serial.Serial(
+            serial_adapter = SerialAdapter(
                 str(file_path),
                 baudrate=data['baudrate'],
-                timeout=data['timeout_read'],
-                write_timeout=data['timeout_write'],
+                timeout_read=data['timeout_read'],
+                timeout_write=data['timeout_write'],
             )
             self.gcode = GrowboxGCodeBuilder(
                 serial_adapter,
                 callback_answer=lambda s: self.print_to_log(s, True),
                 callback_write=lambda s: self.callback_write(s, True),
+                need_wait_answer=True,
             )
             self.objects_to_close.append(serial_adapter)
         elif open_type == 'connect' and open_subtype == 'http':
@@ -1124,6 +1125,7 @@ class MainPanelWindow(QMainWindow):
                 http_adapter,
                 callback_answer=lambda s: self.print_to_log(s, True),
                 callback_write=lambda s: self.callback_write(s, True),
+                need_wait_answer=True,
             )
 
         layout = QVBoxLayout()
@@ -1278,9 +1280,9 @@ class PlantProfileWindow(QMainWindow):
         default_file_name = self.file_path.stem if self.file_path else profile_data['species_lat']
         file_path, mask = QFileDialog.getSaveFileName(self, 'Сохранение G-код', default_file_name, '*.gcode')
         if file_path:
-            with open(file_path, 'w') as output_file:
+            with open(file_path, 'wb') as output_file:
                 generate_gcode(
-                    GrowboxGCodeBuilder(output=output_file, need_wait_answer=False),
+                    GrowboxGCodeBuilder(output_file),
                     profile_data,
                     self.grow_mode,
                 )

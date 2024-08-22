@@ -1,9 +1,7 @@
-import io
 import sys
 
-import serial
-
-from growbox.gcode_parser import parse_answer
+from sygrowbox.base_adapter import BaseAdapter
+from sygrowbox.gcode_parser import parse_answer
 
 # commands = {}
 
@@ -17,14 +15,14 @@ from growbox.gcode_parser import parse_answer
 
 
 class WriterInterface:
-    def __init__(self, output, need_wait_answer: bool | None = None, callback_answer=None, callback_write=None):
+    def __init__(self, output, need_wait_answer: bool = False, callback_answer=None, callback_write=None):
         self.output = output
         self.callback_answer = callback_answer
         self.callback_write = callback_write
-        if need_wait_answer is None:
-            self.need_wait_answer = hasattr(output, 'read') #isinstance(output, serial.Serial)
-        else:
-            self.need_wait_answer = need_wait_answer
+        # if need_wait_answer is None:
+        #     self.need_wait_answer = hasattr(output, 'read') #isinstance(output, serial.Serial)
+        # else:
+        self.need_wait_answer = need_wait_answer
 
     def _read_until_end(self, count_lines=1, end_byte=b'\n', max_bytes=100):
         received_bytes = []
@@ -49,16 +47,11 @@ class WriterInterface:
 
         answer = None
         data = f'{data}\n'
-        mode = getattr(self.output, 'mode', 'wb')
-        encoding = getattr(self.output, 'encoding', 'utf-8')
 
         if self.callback_write:
             self.callback_write(data)
 
-        if mode == 'wb':
-            data = data.encode(encoding)
-
-        self.output.write(data)
+        self.output.write(data.encode('utf-8'))
         if self.need_wait_answer:
             answer = self._read_until_end(count_lines_to_receive, max_bytes=max_bytes)  # self.output.read(100)
             # answer = self.output.read(100)
@@ -139,10 +132,10 @@ class AutoCycleHard(BaseAuto):
         answer_lines = self.output.write_and_parse(f'E102 A{actuator}', 3)
         return int(answer_lines[0][1]), int(answer_lines[1][1])
 
-    def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
+    def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):  # TODO: duration - объект Time
         return self.output.write(f'E101 A{actuator} B{period} D{duration}')
 
-    def get_duration(self, actuator: Actuator | int | str, period: int):
+    def get_duration(self, actuator: Actuator | int | str, period: int):  # TODO: duration - объект Time
         answer_lines = self.output.write_and_parse(f'E1011 A{actuator} B{period}', 2)
         return int(answer_lines[0][1])
 
@@ -170,10 +163,10 @@ class AutoCycleSoft(BaseAuto):
         answer_lines = self.output.write_and_parse(f'E152 A{actuator}', 3)
         return int(answer_lines[0][1]), int(answer_lines[1][1])
 
-    def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):
+    def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):  # TODO: duration - объект Time
         return self.output.write(f'E151 A{actuator} P{period} D{duration}')
 
-    def get_duration(self, actuator: Actuator | int | str, period: int):
+    def get_duration(self, actuator: Actuator | int | str, period: int):  # TODO: duration - объект Time
         answer_lines = self.output.write_and_parse(f'E1511 A{actuator} P{period}', 2)
         return int(answer_lines[0][1])
 
@@ -217,6 +210,8 @@ class AutoTimer(BaseAuto):
     CODE = 3
     DEFAULT_TURN = False
 
+    # TODO: перенести сюда методы для удобной работы с таймером
+
     def get_minute_bits(self, actuator: Actuator | int | str):
         answer_lines = self.output.write_and_parse(f'E2511 A{actuator}', 13, max_bytes=123)
         return [int(line[1]) for line in answer_lines]
@@ -226,6 +221,7 @@ class AutoTimer(BaseAuto):
 
 
 class GrowboxGCodeBuilder:
+    """Генерирует G-код и отправляет в гроубокс"""
     A_HUMID = 0
     A_EXTRACTOR = 1
     A_WHITE_LIGHT = 2
@@ -233,10 +229,10 @@ class GrowboxGCodeBuilder:
 
     def __init__(
             self,
-            output: io.TextIOWrapper | serial.Serial = sys.stdout,
+            output: BaseAdapter = sys.stdout,
             callback_answer=None,
             callback_write=None,
-            need_wait_answer=True,
+            need_wait_answer=False,
     ):
         self.output = WriterInterface(
             output,
@@ -283,11 +279,11 @@ class GrowboxGCodeBuilder:
     def turn_off_all_autos(self):
         return self.output.write('E3')
 
-    def get_time(self):
+    def get_time(self): # TODO: отдавать объект Time
         answer_lines = self.output.write_and_parse('E81', 3)
         return int(answer_lines[0][1]), int(answer_lines[1][1])
 
-    def set_time(self, hours, minutes):
+    def set_time(self, hours, minutes): # TODO: передавать объект Time
         return self.output.write(f'E8 H{hours} M{minutes}')
 
     def get_time_source(self):
@@ -299,6 +295,7 @@ class GrowboxGCodeBuilder:
 
 
 if __name__ == '__main__':
+    import serial
     from serial.tools.list_ports import comports
 
     port = None
