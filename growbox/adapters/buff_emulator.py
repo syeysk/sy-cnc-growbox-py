@@ -16,6 +16,9 @@ class BuffEmulator(BaseEmulator):
     def get_default_time_bytes(self):
         return [0] * 12
 
+    def get_default_time_flags(self):
+        return [[0] * 4] * 24
+
     ## Датчики и исполнительные устройства, общие команды
 
     def e0(self, g):
@@ -131,6 +134,27 @@ class BuffEmulator(BaseEmulator):
 
         for byte_value in bytes_list:
             self.comment('V', byte_value)
+
+    def e252(self, g):
+        actuator_data = self.a_timer.setdefault(str(g['A']), {})
+        flags_list = actuator_data.get('flags')
+        if not flags_list:
+            flags_list = self.get_default_time_flags()
+            actuator_data['flags'] = flags_list
+
+        if 'M' in g:
+            flags_list[g['H']][g['M']] = g['B']
+        else:
+            flags_list[g['H']] = [g['B']] * 4
+
+    def e2521(self, g):
+        actuator_data = self.a_timer.setdefault(str(g['A']), {})
+        flags_list = actuator_data.get('flags')
+        if not flags_list:
+            flags_list = self.get_default_time_flags()
+            actuator_data['flags'] = flags_list
+
+        self.comment('B', flags_list[g['H']][g['M']])
 
 #     gcode = parse_gcode_line(gcode_line)
 #     # from gcode_builder import commands

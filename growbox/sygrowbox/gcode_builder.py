@@ -209,8 +209,13 @@ class AutoClimateControl(BaseAuto):
 class AutoTimer(BaseAuto):
     CODE = 3
     DEFAULT_TURN = False
+    PARTS_PER_HOUR = 4
 
-    # TODO: перенести сюда методы для удобной работы с таймером
+    def _get_bit(self, hour_index: int, minute_index: int, minutes_bits):
+        index_bit = self.PARTS_PER_HOUR * hour_index + minute_index
+        index_byte = index_bit // 8
+        index_bit_inside_byte = index_bit % 8
+        return minutes_bits[index_byte] >> (7 - index_bit_inside_byte) & 1
 
     def get_minute_bits(self, actuator: Actuator | int | str):
         answer_lines = self.output.write_and_parse(f'E2511 A{actuator}', 13, max_bytes=123)
@@ -218,6 +223,26 @@ class AutoTimer(BaseAuto):
 
     def set_minute_bits(self, actuator: Actuator | int | str, byte_index: int, byte_value: int):
         self.output.write(f'E251 A{actuator} B{byte_index} V{byte_value}')
+
+    def get_minute_flags(self, actuator: Actuator | int | str):
+        minutes_bits = self.get_minute_bits(actuator)
+        minute_flags = []
+        for hour_index in range(0, 24):
+            minute_flags.append([0] * self.PARTS_PER_HOUR)
+            for minute_index in range(0, self.PARTS_PER_HOUR):
+                minute_flags[hour_index][minute_index] = self._get_bit(hour_index, minute_index, minutes_bits)
+
+        return minute_flags
+
+    def set_minute_flag(self, actuator: Actuator | int | str, hour_index: int, minute_index: None | int, value: bool):
+        if minute_index is None:
+            self.output.write(f'E252 A{actuator} H{hour_index} B{int(value)}')
+        else:
+            self.output.write(f'E252 A{actuator} H{hour_index} M{minute_index} B{int(value)}')
+
+    def get_minute_flag(self, actuator: Actuator | int | str, hour_index: int, minute_index: int):
+        answer_lines = self.output.write_and_parse(f'E2521 A{actuator} H{hour_index} M{minute_index}', 2)
+        return int(answer_lines[0][1])
 
 
 class GrowboxGCodeBuilder:
