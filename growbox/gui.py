@@ -481,15 +481,15 @@ class AutoTimerWindow(BaseAutoWindow):
     def update(self, checked=None):
         def result_update(data: list):
             self.minutes_flags = data
+            for hour_index, hour_flags in enumerate(self.minutes_flags):
+                for minute_index, value in enumerate(hour_flags):
+                    self.auto_buff.set_minute_flag(self.actuator_code, hour_index, minute_index, value)
+
             for hour_index in range(0, 24):
                 are_checked = [
                     self.minutes_flags[hour_index][minute_index] for minute_index in range(0, self.PARTS_PER_HOUR)
                 ]
                 self.set_cells(hour_index, are_checked)
-
-            for hour_index, hour_flags in enumerate(self.minutes_flags):
-                for minute_index, value in enumerate(hour_flags):
-                    self.auto_buff.set_minute_flag(self.actuator_code, hour_index, minute_index, value)
 
         def task_update():
             return self.gcode_auto.get_minute_flags(self.actuator_code)
@@ -515,12 +515,7 @@ class AutoTimerWindow(BaseAutoWindow):
         self.gcode_auto.set_minute_flag(self.actuator_code, hour, minute_index, is_checked)
         self.auto_buff.set_minute_flag(self.actuator_code, hour, minute_index, is_checked)
 
-        count_checked = sum(
-            (
-                self.auto_buff.get_minute_flag(self.actuator_code, hour, minute_index)
-                for minute_index in range(0, self.PARTS_PER_HOUR)
-            ),
-        )
+        count_checked = sum(self.minutes_flags[hour][minute_index] for minute_index in range(0, self.PARTS_PER_HOUR))
         self.toggle_btn(self.hour_btns[hour], count_checked == self.PARTS_PER_HOUR)
 
     def build_time_buttons(self, hour_start, hours_end):
