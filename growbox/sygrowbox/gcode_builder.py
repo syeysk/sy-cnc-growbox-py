@@ -23,6 +23,10 @@ class WriterInterface:
         #     self.need_wait_answer = hasattr(output, 'read') #isinstance(output, serial.Serial)
         # else:
         self.need_wait_answer = need_wait_answer
+        self.mocked_answer = None
+
+    def mock_answer(self, answer):
+        self.mocked_answer = answer
 
     def _read_until_end(self, count_lines=1, end_byte=b'\n', max_bytes=100):
         received_bytes = []
@@ -51,12 +55,16 @@ class WriterInterface:
         if self.callback_write:
             self.callback_write(data)
 
-        self.output.write(data.encode('utf-8'))
-        if self.need_wait_answer:
-            answer = self._read_until_end(count_lines_to_receive, max_bytes=max_bytes)  # self.output.read(100)
-            # answer = self.output.read(100)
-            if self.callback_answer:
-                self.callback_answer(answer)
+        if self.mocked_answer:
+            answer = self.mocked_answer
+            self.mocked_answer = None
+        else:
+            self.output.write(data.encode('utf-8'))
+            if self.need_wait_answer:
+                answer = self._read_until_end(count_lines_to_receive, max_bytes=max_bytes)  # self.output.read(100)
+                # answer = self.output.read(100)
+                if self.callback_answer:
+                    self.callback_answer(answer)
 
         if timeout and hasattr(self.output, 'timeout'):
             self.output.timeout = prev_timeout
@@ -84,7 +92,7 @@ class Actuator:
 
     def get(self) -> int:
         answer_lines = self.output.write_and_parse(f'E1 A{self.code}', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
     def set(self, value: int):
         return self.output.write(f'E0 A{self.code} V{value}')
@@ -101,7 +109,7 @@ class Sensor:
 
     def get(self) -> float:
         answer_lines = self.output.write_and_parse(f'E2 S{self.code}', 2, 2.2)
-        return answer_lines[0][1]
+        return answer_lines[0][1] if self.output.need_wait_answer else None
 
 
 class BaseAuto:
@@ -115,7 +123,7 @@ class BaseAuto:
 
     def is_turn(self, actuator: Actuator | int | str) -> bool:
         answer_lines = self.output.write_and_parse(f'E4 R{self.CODE} A{actuator}', 2)
-        return bool(answer_lines[0][1])
+        return bool(answer_lines[0][1]) if self.output.need_wait_answer else None
 
 
 class AutoCycleHard(BaseAuto):
@@ -130,21 +138,21 @@ class AutoCycleHard(BaseAuto):
 
     def get_current(self, actuator: Actuator | int | str):
         answer_lines = self.output.write_and_parse(f'E102 A{actuator}', 3)
-        return int(answer_lines[0][1]), int(answer_lines[1][1])
+        return (int(answer_lines[0][1]), int(answer_lines[1][1])) if self.output.need_wait_answer else None
 
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):  # TODO: duration - объект Time
         return self.output.write(f'E101 A{actuator} B{period} D{duration}')
 
     def get_duration(self, actuator: Actuator | int | str, period: int):  # TODO: duration - объект Time
         answer_lines = self.output.write_and_parse(f'E1011 A{actuator} B{period}', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
     def set_value(self, actuator: Actuator | int | str, period: int, value: int):
         return self.output.write(f'E103 A{actuator} B{period} V{value}')
 
     def get_value(self, actuator: Actuator | int | str, period: int):
         answer_lines = self.output.write_and_parse(f'E1031 A{actuator} B{period}', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
 
 class AutoCycleSoft(BaseAuto):
@@ -161,21 +169,21 @@ class AutoCycleSoft(BaseAuto):
 
     def get_current(self, actuator: Actuator | int | str):
         answer_lines = self.output.write_and_parse(f'E152 A{actuator}', 3)
-        return int(answer_lines[0][1]), int(answer_lines[1][1])
+        return (int(answer_lines[0][1]), int(answer_lines[1][1])) if self.output.need_wait_answer else None
 
     def set_duration(self, actuator: Actuator | int | str, period: int, duration: int):  # TODO: duration - объект Time
         return self.output.write(f'E151 A{actuator} P{period} D{duration}')
 
     def get_duration(self, actuator: Actuator | int | str, period: int):  # TODO: duration - объект Time
         answer_lines = self.output.write_and_parse(f'E1511 A{actuator} P{period}', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
     def set_value(self, actuator: Actuator | int | str, period: int, value: int):
         return self.output.write(f'E153 A{actuator} P{period} V{value}')
 
     def get_value(self, actuator: Actuator | int | str, period: int):
         answer_lines = self.output.write_and_parse(f'E1531 A{actuator} P{period}', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
 
 class AutoClimateControl(BaseAuto):
@@ -189,21 +197,21 @@ class AutoClimateControl(BaseAuto):
 
     def get_min(self, actuator: Actuator | int | str):
         answer_lines = self.output.write_and_parse(f'E2021 A{actuator}', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
     def set_max(self, actuator: Actuator | int | str, value: int):
         return self.output.write(f'E203 A{actuator} V{value}')
 
     def get_max(self, actuator: Actuator | int | str):
         answer_lines = self.output.write_and_parse(f'E2031 A{actuator}', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
     def set_sensor(self, actuator: Actuator | int | str, sensor: Sensor | int | str):
         return self.output.write(f'E201 A{actuator} S{sensor}')
 
     def get_sensor(self, actuator: Actuator | int | str):
         answer_lines = self.output.write_and_parse(f'E2011 A{actuator}', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
 
 class AutoTimer(BaseAuto):
@@ -219,13 +227,16 @@ class AutoTimer(BaseAuto):
 
     def get_minute_bits(self, actuator: Actuator | int | str):
         answer_lines = self.output.write_and_parse(f'E2511 A{actuator}', 13, max_bytes=123)
-        return [int(line[1]) for line in answer_lines]
+        return [int(line[1]) for line in answer_lines] if self.output.need_wait_answer else None
 
     def set_minute_bits(self, actuator: Actuator | int | str, byte_index: int, byte_value: int):
-        self.output.write(f'E251 A{actuator} B{byte_index} V{byte_value}')
+        return self.output.write(f'E251 A{actuator} B{byte_index} V{byte_value}')
 
     def get_minute_flags(self, actuator: Actuator | int | str):
         minutes_bits = self.get_minute_bits(actuator)
+        if not minutes_bits:
+            return
+
         minute_flags = []
         for hour_index in range(0, 24):
             minute_flags.append([0] * self.PARTS_PER_HOUR)
@@ -236,13 +247,13 @@ class AutoTimer(BaseAuto):
 
     def set_minute_flag(self, actuator: Actuator | int | str, hour_index: int, minute_index: None | int, value: bool):
         if minute_index is None:
-            self.output.write(f'E252 A{actuator} H{hour_index} B{int(value)}')
+            return self.output.write(f'E252 A{actuator} H{hour_index} B{int(value)}')
         else:
-            self.output.write(f'E252 A{actuator} H{hour_index} M{minute_index} B{int(value)}')
+            return self.output.write(f'E252 A{actuator} H{hour_index} M{minute_index} B{int(value)}')
 
     def get_minute_flag(self, actuator: Actuator | int | str, hour_index: int, minute_index: int):
         answer_lines = self.output.write_and_parse(f'E2521 A{actuator} H{hour_index} M{minute_index}', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
 
 class GrowboxGCodeBuilder:
@@ -295,6 +306,16 @@ class GrowboxGCodeBuilder:
             self.timer.CODE: self.timer,
         }
 
+    def execute(self, methods_chain_str: str, args: dict, answer=None):
+        method = self
+        for method_str in methods_chain_str.split('.'):
+            method = method[int(method_str)] if method_str.isdigit() else getattr(method, method_str)
+
+        if answer:
+            self.output.mock_answer(answer)
+
+        return method(**args)
+
     def set_actuator_value(self, actuator, value: int):
         return self.actuators[actuator].set(value)
 
@@ -306,14 +327,14 @@ class GrowboxGCodeBuilder:
 
     def get_time(self): # TODO: отдавать объект Time
         answer_lines = self.output.write_and_parse('E81', 3)
-        return int(answer_lines[0][1]), int(answer_lines[1][1])
+        return (int(answer_lines[0][1]), int(answer_lines[1][1])) if self.output.need_wait_answer else None
 
     def set_time(self, hours, minutes): # TODO: передавать объект Time
         return self.output.write(f'E8 H{hours} M{minutes}')
 
     def get_time_source(self):
         answer_lines = self.output.write_and_parse('E91', 2)
-        return int(answer_lines[0][1])
+        return int(answer_lines[0][1]) if self.output.need_wait_answer else None
 
     def set_time_source(self, source_code):
         return self.output.write(f'E9 T{source_code}')

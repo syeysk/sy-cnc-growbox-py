@@ -29,11 +29,15 @@ def parse_gcode_line(gcode_line):
 
 
 def parse_answer(answer):
-    answer_lines = answer.decode().strip().split('\r\n')[:-1]
     values = []
-    for line in answer_lines:
-        value = line[2:].strip()
-        value = None if value.upper() == 'NAN' else float(value)
-        values.append((line[1], value))
+    if answer:
+        if not isinstance(answer, str):
+            answer = answer.decode('utf-8')
+
+        answer_lines = answer.strip().split('\r\n')[:-1]
+        for line in answer_lines:
+            value = line[2:].strip()
+            value = None if value.upper() == 'NAN' else float(value)
+            values.append((line[1], value))
 
     return values

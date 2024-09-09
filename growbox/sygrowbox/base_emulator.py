@@ -1,8 +1,10 @@
+from sygrowbox.base_adapter import BaseAdapter
 from sygrowbox.gcode_parser import parse_gcode_line
 
 
-class BaseEmulator:
-    def __init__(self):
+class BaseEmulator(BaseAdapter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.answer = ''
 
     def println(self, data):
