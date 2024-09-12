@@ -909,7 +909,6 @@ class MainPanelWindow(QMainWindow):
     def build_groupbox_actuators(self):
         layout = QGridLayout()
         self.build_btn_set_value(layout, self.gcode.A_WHITE_LIGHT, 'Белый свет:', 0)
-        #self.build_btn_set_value(layout, self.gcode.A_FRED_LIGHT, 'Дальний красный:', 1)
         self.build_btn_set_value(layout, self.gcode.A_EXTRACTOR, 'Вытяжка:', 1)
         self.build_btn_set_value(layout, self.gcode.A_HUMID, 'Увлажнитель:', 2)
         groupbox = QGroupBox('Исполнительные устройства')
@@ -951,7 +950,6 @@ class MainPanelWindow(QMainWindow):
 
         actuators = [
             ('Белый свет', self.gcode.A_WHITE_LIGHT),
-            #('Дальний красный', self.gcode.A_FRED_LIGHT),
             ('Вытяжка', self.gcode.A_EXTRACTOR),
             ('Увлажнитель', self.gcode.A_HUMID),
         ]

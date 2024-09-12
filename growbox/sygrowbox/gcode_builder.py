@@ -261,7 +261,6 @@ class GrowboxGCodeBuilder:
     A_HUMID = 0
     A_EXTRACTOR = 1
     A_WHITE_LIGHT = 2
-    A_FRED_LIGHT = 3
 
     def __init__(
             self,
@@ -280,7 +279,6 @@ class GrowboxGCodeBuilder:
         self.a_humid = Actuator(self.A_HUMID, self.output)
         self.a_extractor = Actuator(self.A_EXTRACTOR, self.output)
         self.a_white_light = Actuator(self.A_WHITE_LIGHT, self.output)
-        #self.a_fred_light = Actuator(self.A_FRED_LIGHT, self.output)
         self.actuators = {
             self.a_humid.code: self.a_humid,
             self.a_extractor.code: self.a_extractor,
